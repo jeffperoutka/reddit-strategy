@@ -121,9 +121,9 @@ async function handleMention(ctx) {
     const reply = currentRules || 'No training rules yet. Reply to any strategy thread to teach me!';
     await slack.postMessage(channel, reply, { threadTs: ts });
   } else if (lowerText.includes('help')) {
-    await slack.postMessage(channel, `*Reddit Strategy Bot Commands:*
-• \`/reddit-strategy\` — Run a new Reddit strategy
-• \`@bot list rules\` — Show learned rules
-• Reply in any strategy thread to give feedback and train me`, { threadTs: ts });
+    await slack.postMessage(channel, `*Sally the Reddit Bot — Commands:*
+• \`/reddit-strategy\` — Kick off a new Reddit strategy run
+• \`@Sally list rules\` — Show learned rules
+• Reply in any strategy thread to give feedback and train me!`, { threadTs: ts });
   }
 }

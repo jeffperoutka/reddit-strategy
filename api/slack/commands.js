@@ -65,6 +65,41 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
       },
     });
 
+    // ── Month Number ──
+    blocks.push({
+      type: 'input',
+      block_id: 'month_block',
+      label: { type: 'plain_text', text: 'Campaign Month' },
+      optional: true,
+      element: {
+        type: 'static_select',
+        action_id: 'month_select',
+        placeholder: { type: 'plain_text', text: 'Select month (default: Month 1)' },
+        options: [
+          { text: { type: 'plain_text', text: 'Month 1 (New client)' }, value: '1' },
+          { text: { type: 'plain_text', text: 'Month 2' }, value: '2' },
+          { text: { type: 'plain_text', text: 'Month 3' }, value: '3' },
+          { text: { type: 'plain_text', text: 'Month 4' }, value: '4' },
+          { text: { type: 'plain_text', text: 'Month 5' }, value: '5' },
+          { text: { type: 'plain_text', text: 'Month 6+' }, value: '6' },
+        ],
+      },
+    });
+
+    // ── Previous Month Spreadsheet URL (for Month 2+) ──
+    blocks.push({
+      type: 'input',
+      block_id: 'prev_spreadsheet_block',
+      label: { type: 'plain_text', text: 'Previous Month Spreadsheet URL' },
+      optional: true,
+      hint: { type: 'plain_text', text: 'Paste the Google Sheets or file URL from last month so Sally can build on the existing tracker.' },
+      element: {
+        type: 'url_text_input',
+        action_id: 'prev_spreadsheet_input',
+        placeholder: { type: 'plain_text', text: 'https://docs.google.com/spreadsheets/d/... (Month 2+ only)' },
+      },
+    });
+
     // ── Custom Keywords (optional) ──
     blocks.push({
       type: 'input',
@@ -109,7 +144,7 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
       type: 'modal',
       callback_id: 'reddit_strategy_submit',
       private_metadata: JSON.stringify({ channel_id: channelId || '' }),
-      title: { type: 'plain_text', text: 'Reddit Strategy' },
+      title: { type: 'plain_text', text: 'Sally — Reddit Strategy' },
       submit: { type: 'plain_text', text: 'Run Strategy' },
       close: { type: 'plain_text', text: 'Cancel' },
       blocks,

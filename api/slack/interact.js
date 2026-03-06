@@ -4,6 +4,7 @@ const github = require('../../lib/connectors/github');
 const { runStrategyPipeline } = require('../../lib/engine');
 const { getPackage, getPackageOptions } = require('../../lib/packages');
 const { getBrandProfile } = require('../../lib/brand-context');
+const { buildStrategySpreadsheet } = require('../../lib/spreadsheet');
 
 // ── In-memory store for pending strategies ──
 const pendingStrategies = new Map();
@@ -179,6 +180,8 @@ async function handleStrategyRun(payload) {
   const customKeywords = values?.keywords_block?.keywords_input?.value || '';
   const targetSubreddits = values?.subreddits_block?.subreddits_input?.value || '';
   const notes = values?.notes_block?.notes_input?.value || '';
+  const campaignMonth = values?.month_block?.month_select?.selected_option?.value || '1';
+  const prevSpreadsheetUrl = values?.prev_spreadsheet_block?.prev_spreadsheet_input?.value || '';
 
   if (!clientName) {
     console.error('Missing client name');
@@ -187,18 +190,37 @@ async function handleStrategyRun(payload) {
 
   const pkg = getPackage(packageTier);
 
-  // Post parent message
+  // ── Resolve channel — prefer #reddit-bot, fallback chain ──
   let channel = metadata.channel_id || process.env.SLACK_CHANNEL_ID;
   let parentMsg;
+
+  // ── Send immediate acknowledgement to the user ──
+  try {
+    const ackChannel = await slack.openDM(userId);
+    await slack.postMessage(ackChannel, [
+      `🤖 *Hey! Sally here.* Your Reddit strategy run just kicked off!`,
+      ``,
+      `*Client:* ${titleCase(clientName)}`,
+      `*Package:* ${pkg?.name || packageTier}`,
+      `*Month:* ${campaignMonth}`,
+      customKeywords ? `*Keywords:* ${customKeywords}` : '',
+      ``,
+      `I'll post the full results in <#${channel}> when I'm done. Hang tight — this usually takes 2-3 minutes. ⏳`,
+    ].filter(Boolean).join('\n'));
+  } catch (ackErr) {
+    console.error('Acknowledgement DM failed:', ackErr.message, '— continuing anyway');
+  }
 
   const recapLines = [
     `🎯 *Reddit Strategy Run*`,
     ``,
     `*Client:* ${titleCase(clientName)}`,
     `*Package:* ${pkg?.name || packageTier}`,
+    `*Month:* ${campaignMonth}`,
     customKeywords ? `*Keywords:* ${customKeywords}` : '',
     targetSubreddits ? `*Target Subreddits:* ${targetSubreddits}` : '',
     notes ? `*Notes:* ${notes.slice(0, 200)}` : '',
+    prevSpreadsheetUrl ? `*Previous Month Report:* ${prevSpreadsheetUrl}` : '',
   ].filter(Boolean).join('\n');
 
   try {
@@ -232,7 +254,7 @@ async function handleStrategyRun(payload) {
 
   try {
     // Progress message
-    const progressMsg = await threadPost('⏳ Starting Reddit strategy...');
+    const progressMsg = await threadPost('⏳ Sally is starting your Reddit strategy...');
     const progressTs = progressMsg.ts;
 
     const updateProgress = async (stepText) => {
@@ -274,6 +296,8 @@ async function handleStrategyRun(payload) {
       strategyData,
       brandProfile,
       channel,
+      campaignMonth,
+      prevSpreadsheetUrl,
       approvedComments: new Set(),
       rejectedComments: new Set(),
     });
@@ -284,6 +308,39 @@ async function handleStrategyRun(payload) {
     // Post comment review cards
     if (strategyData.commentsWithAlignment?.length > 0) {
       await postCommentReviewCards(channel, threadTs, strategyData.commentsWithAlignment);
+    }
+
+    // ── Build and upload the XLSX spreadsheet ──
+    try {
+      await threadPost('📊 Building your client-ready spreadsheet...');
+
+      const formData = {
+        month: campaignMonth,
+        prevSpreadsheetUrl,
+        packageName: pkg?.name || packageTier,
+      };
+
+      const xlsxBuffer = await buildStrategySpreadsheet(
+        strategyData,
+        brandProfile,
+        packageTier,
+        formData
+      );
+
+      const filename = `Reddit_Strategy_${titleCase(clientName).replace(/\s+/g, '_')}_Month${campaignMonth}_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+      await slack.uploadFile(
+        xlsxBuffer,
+        filename,
+        channel,
+        {
+          threadTs,
+          initialComment: `📎 *${titleCase(clientName)} — Reddit Strategy Report (${pkg?.name || packageTier}, Month ${campaignMonth})*\nClient-ready spreadsheet with all threads, comments, subreddit strategy, and reporting tracker.`,
+        }
+      );
+    } catch (xlsxErr) {
+      console.error('Spreadsheet generation failed:', xlsxErr.message, xlsxErr.stack);
+      await threadPost(`⚠️ Spreadsheet generation failed: ${xlsxErr.message}. The Slack report above is still complete.`);
     }
 
   } catch (err) {
@@ -361,7 +418,7 @@ async function postStrategyReport(channel, threadTs, data, clientName, packageTi
   // Footer
   blocks.push({
     type: 'context',
-    elements: [{ type: 'mrkdwn', text: `_${data.threads?.length || 0} threads discovered • ${data.commentsWithAlignment?.length || 0} comments drafted • ${data.keywords?.length || 0} keywords researched_` }],
+    elements: [{ type: 'mrkdwn', text: `_${data.threads?.length || 0} threads discovered • ${data.commentsWithAlignment?.length || 0} comments drafted • ${data.keywords?.length || 0} keywords researched • Generated by Sally the Reddit Bot_` }],
   });
 
   // Cap blocks
@@ -609,7 +666,7 @@ async function handleApproveAll(payload) {
     strategy.approvedComments.add(i);
   }
 
-  await slack.postMessage(channel, `✅ All ${total} comments approved. Ready for vendor handoff.`, { threadTs });
+  await slack.postMessage(channel, `✅ All ${total} comments approved by <@${payload.user?.id}>. Ready for vendor handoff.`, { threadTs });
 }
 
 async function handleSendToVendor(payload) {
