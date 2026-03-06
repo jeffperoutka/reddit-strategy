@@ -1,0 +1,9 @@
+{
+  "name": "reddit-strategy",
+  "version": "1.0.0",
+  "description": "Reddit Strategy Bot — discovers threads, crafts comments, checks brand alignment, manages QA approval",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@vercel/functions": "^1.4.0"
+  }
+}
