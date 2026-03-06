@@ -73,10 +73,58 @@ module.exports = async function handler(req, res) {
 
 // ─── Client Search Suggestions ───
 
+// Client Info Docs folder ID in ClickUp "Client Delivery" space
+const CLIENT_INFO_DOCS_FOLDER_ID = '901812024928';
+
 async function buildClientSuggestions(query) {
   const options = [];
+  const seen = new Set();
 
-  // Read cached brands from Brand Guardian repo
+  // Primary source: ClickUp Client Info Docs folder via v3 docs API
+  try {
+    const cuToken = process.env.CLICKUP_API_TOKEN;
+    const wsId = process.env.CLICKUP_WORKSPACE_ID;
+    if (cuToken && wsId) {
+      const cuResp = await fetch(`https://api.clickup.com/api/v3/workspaces/${wsId}/docs`, {
+        headers: { 'Authorization': cuToken },
+      });
+      if (cuResp.ok) {
+        const data = await cuResp.json();
+        const clientDocs = (data.docs || []).filter(doc =>
+          doc.parent?.id === CLIENT_INFO_DOCS_FOLDER_ID &&
+          !doc.deleted &&
+          doc.name &&
+          !doc.name.toLowerCase().includes('template') &&
+          !doc.name.toLowerCase().includes('definitions') &&
+          doc.name !== 'AD6SC3RT6'
+        );
+
+        for (const doc of clientDocs) {
+          // Strip "Client Info Doc" suffix to get clean client name
+          const name = doc.name
+            .replace(/\s*(client\s+)?info(\s+doc)?(\s+template)?$/i, '')
+            .trim();
+          if (!name) continue;
+
+          const val = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+          const nameLower = name.toLowerCase();
+
+          if (seen.has(nameLower)) continue;
+          if (query && !nameLower.includes(query)) continue;
+
+          seen.add(nameLower);
+          options.push({
+            text: { type: 'plain_text', text: name },
+            value: val,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error('ClickUp docs error:', err.message);
+  }
+
+  // Secondary source: Brand Guardian cache (supplements ClickUp)
   const pat = process.env.GITHUB_PAT;
   if (pat) {
     try {
@@ -85,15 +133,14 @@ async function buildClientSuggestions(query) {
       });
       if (resp.ok) {
         const files = await resp.json();
-        const brands = files
-          .filter(f => f.name.endsWith('.json'))
-          .map(f => f.name.replace('.json', '').replace(/-/g, ' '));
+        for (const f of files) {
+          if (!f.name.endsWith('.json')) continue;
+          const brand = f.name.replace('.json', '').replace(/-/g, ' ');
+          const brandLower = brand.toLowerCase();
+          if (seen.has(brandLower)) continue;
+          if (query && !brandLower.includes(query)) continue;
 
-        const filtered = query
-          ? brands.filter(b => b.includes(query))
-          : brands;
-
-        for (const brand of filtered.slice(0, 90)) {
+          seen.add(brandLower);
           options.push({
             text: { type: 'plain_text', text: titleCase(brand) },
             value: brand.toLowerCase().replace(/\s/g, '-'),
@@ -101,41 +148,11 @@ async function buildClientSuggestions(query) {
         }
       }
     } catch (err) {
-      console.error('Client search error:', err.message);
+      console.error('Brand cache search error:', err.message);
     }
   }
 
-  // Also search ClickUp if available
-  try {
-    const cuToken = process.env.CLICKUP_API_TOKEN;
-    const wsId = process.env.CLICKUP_WORKSPACE_ID;
-    if (cuToken && wsId) {
-      const searchQuery = query || 'Client Info Doc';
-      const cuResp = await fetch(`https://api.clickup.com/api/v3/workspaces/${wsId}/search`, {
-        method: 'POST',
-        headers: { 'Authorization': cuToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, types: ['doc'], limit: 20 }),
-      });
-      if (cuResp.ok) {
-        const data = await cuResp.json();
-        for (const doc of (data.results || [])) {
-          const name = doc.name?.replace(/\s*(client\s+)?info(\s+doc)?$/i, '').trim();
-          if (name && !options.some(o => o.text.text.toLowerCase() === name.toLowerCase())) {
-            const val = name.toLowerCase().replace(/\s/g, '-');
-            if (!query || val.includes(query)) {
-              options.push({
-                text: { type: 'plain_text', text: name },
-                value: val,
-              });
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.error('ClickUp search error:', err.message);
-  }
-
+  // Allow adding new clients
   if (query && !options.some(o => o.value === query.replace(/\s/g, '-'))) {
     options.push({
       text: { type: 'plain_text', text: `➕ New client: ${titleCase(query)}` },
@@ -150,7 +167,7 @@ async function buildClientSuggestions(query) {
     });
   }
 
-  return { options };
+  return { options: options.slice(0, 100) };
 }
 
 // ─── Strategy Run Handler ───
