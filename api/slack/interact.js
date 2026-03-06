@@ -206,14 +206,24 @@ async function handleStrategyRun(payload) {
     parentMsg = await slack.postMessage(channel, recapLines);
     if (!parentMsg.ok) throw new Error(parentMsg.error);
   } catch (err) {
-    console.error(`Channel post failed (${channel}):`, err.message, '— falling back to DM');
+    console.error(`Channel post failed (${channel}):`, err.message, '— trying fallbacks');
+    // Fallback 1: try DM
     try {
       channel = await slack.openDM(userId);
       parentMsg = await slack.postMessage(channel, recapLines);
       if (!parentMsg.ok) throw new Error(parentMsg.error);
     } catch (dmErr) {
-      console.error('DM fallback failed:', dmErr.message);
-      return;
+      console.error('DM fallback failed:', dmErr.message, '— trying public channel');
+      // Fallback 2: find and post to a public channel
+      try {
+        channel = await slack.findPublicChannel();
+        await slack.joinChannel(channel).catch(() => {});
+        parentMsg = await slack.postMessage(channel, recapLines);
+        if (!parentMsg.ok) throw new Error(parentMsg.error);
+      } catch (pubErr) {
+        console.error('Public channel fallback failed:', pubErr.message);
+        return;
+      }
     }
   }
 
