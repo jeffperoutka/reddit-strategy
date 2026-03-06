@@ -206,9 +206,9 @@ async function handleStrategyRun(payload) {
     parentMsg = await slack.postMessage(channel, recapLines);
     if (!parentMsg.ok) throw new Error(parentMsg.error);
   } catch (err) {
-    console.error(`Channel post failed:`, err.message);
-    channel = userId;
+    console.error(`Channel post failed (${channel}):`, err.message, '— falling back to DM');
     try {
+      channel = await slack.openDM(userId);
       parentMsg = await slack.postMessage(channel, recapLines);
       if (!parentMsg.ok) throw new Error(parentMsg.error);
     } catch (dmErr) {
