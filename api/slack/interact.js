@@ -1,9 +1,9 @@
 const { waitUntil } = require('@vercel/functions');
-const slack = require('../lib/connectors/slack');
-const github = require('../lib/connectors/github');
-const { runStrategyPipeline } = require('../lib/engine');
-const { getPackage, getPackageOptions } = require('../lib/packages');
-const { getBrandProfile } = require('../lib/brand-context');
+const slack = require('../../lib/connectors/slack');
+const github = require('../../lib/connectors/github');
+const { runStrategyPipeline } = require('../../lib/engine');
+const { getPackage, getPackageOptions } = require('../../lib/packages');
+const { getBrandProfile } = require('../../lib/brand-context');
 
 // ── In-memory store for pending strategies ──
 const pendingStrategies = new Map();

@@ -1,7 +1,7 @@
 const { waitUntil } = require('@vercel/functions');
-const slack = require('../lib/connectors/slack');
-const { readBrandGuardianCache } = require('../lib/connectors/github');
-const { getPackageOptions } = require('../lib/packages');
+const slack = require('../../lib/connectors/slack');
+const { readBrandGuardianCache } = require('../../lib/connectors/github');
+const { getPackageOptions } = require('../../lib/packages');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();

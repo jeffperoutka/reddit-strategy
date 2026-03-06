@@ -1,7 +1,7 @@
 const { waitUntil } = require('@vercel/functions');
 const Anthropic = require('@anthropic-ai/sdk');
-const slack = require('../lib/connectors/slack');
-const { getRulesForPrompt, addRule } = require('../lib/connectors/rules');
+const slack = require('../../lib/connectors/slack');
+const { getRulesForPrompt, addRule } = require('../../lib/connectors/rules');
 
 const botThreads = new Set();
 const BOT_USER_ID = process.env.SLACK_BOT_USER_ID || '';
