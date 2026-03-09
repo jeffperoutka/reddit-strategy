@@ -156,6 +156,7 @@ async function handleStrategyRun(payload) {
       month: campaignMonth,
       prevSpreadsheetUrl,
       packageName: pkg?.name || packageTier,
+      clientDocUrl,
     };
 
     let sheetsUrl;
