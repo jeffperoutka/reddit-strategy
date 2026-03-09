@@ -243,8 +243,11 @@ async function handleStrategyRun(payload) {
     const brandProfile = await getBrandProfile(clientName, websiteUrl, updateProgress);
 
     if (!brandProfile) {
+      const hint = websiteUrl
+        ? 'Website research also failed. Check the URL and try again.'
+        : 'Provide a website URL in the form so George can build a profile from the site.';
       await slack.updateMessage(channel, progressTs,
-        `Could not find brand profile for "${titleCase(clientName)}". Run /brand-check first or provide a website URL.`
+        `Could not load brand profile for "${titleCase(clientName)}". ${hint}`
       );
       return;
     }
