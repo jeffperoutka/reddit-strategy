@@ -46,14 +46,14 @@ const mockStrategyData = {
   commentsWithAlignment: [
     {
       threadTitle: 'Best sleep trackers that actually work?', threadUrl: 'https://reddit.com/r/sleep/comments/abc123', subreddit: 'r/sleep',
-      comment: "I went through like 4 different trackers before finding one that actually changed my habits. The ring-style ones were fine for steps but honestly not great for sleep specifically. I ended up trying a headband tracker (iSleep) and the EEG data was way more detailed than what I was getting from wrist-based stuff. Not perfect — the app could use work and it takes a few nights to get used to wearing it — but the sleep stage data actually helped me figure out my caffeine was killing my deep sleep at 2pm, not just at night.",
+      comment: "I went through like 4 different trackers before finding one that actually changed my habits. The ring-style ones were fine for steps but honestly not great for sleep specifically. I ended up trying iSleep — it is a headband that uses EEG so the data is way more detailed than what I was getting from wrist-based stuff. Not perfect, the app could use some work and it takes a few nights to get used to wearing it. But the sleep stage data actually helped me figure out my caffeine was killing my deep sleep at 2pm, not just at night. That alone was worth it.",
       angle: 'Personal journey with multiple trackers', brandMentionType: 'direct', confidenceScore: 88,
       alignment: { aligned: true, score: 89, issues: [], spamRisk: 'low' },
     },
     {
       threadTitle: 'Non-invasive sleep optimization — what works?', threadUrl: 'https://reddit.com/r/biohackers/comments/def456', subreddit: 'r/biohackers',
-      comment: "For non-invasive options, the biggest gains I have seen are: 1) Temperature regulation (cooling mattress pad made a huge difference), 2) Light exposure timing (get bright light within 30 min of waking), 3) Sleep tracking to find your patterns. On the tracking front, headband-style trackers measure actual brainwaves vs wrist ones that estimate from movement. I use one and the data granularity is legit — you can see exactly when you hit deep sleep vs light sleep vs REM. Worth looking into if you are data-driven about this.",
-      angle: 'Comprehensive biohacking list with tracking as one element', brandMentionType: 'indirect', confidenceScore: 92,
+      comment: "For non-invasive options, the biggest gains I have seen are: 1) Temperature regulation (cooling mattress pad made a huge difference), 2) Light exposure timing (get bright light within 30 min of waking), 3) Sleep tracking to find your patterns. On the tracking front, I switched to iSleep about 4 months ago — it is a headband that measures actual brainwaves vs wrist trackers that estimate from movement. The data granularity is legit, you can see exactly when you hit deep sleep vs light sleep vs REM. If you are data-driven about this stuff, worth checking out EEG-based tracking.",
+      angle: 'Comprehensive biohacking list with tracking as one element', brandMentionType: 'direct', confidenceScore: 92,
       alignment: { aligned: true, score: 94, issues: [], spamRisk: 'low' },
     },
     {
@@ -70,8 +70,8 @@ const mockStrategyData = {
     },
     {
       threadTitle: 'I fixed my sleep — here is what actually helped', threadUrl: 'https://reddit.com/r/sleep/comments/mno345', subreddit: 'r/sleep',
-      comment: "This is great advice. One thing I would add is tracking your sleep stages, not just total hours. I was getting 8 hours but turns out most of it was light sleep. Once I started tracking with a headband that measures brainwaves, I could see what was actually going on and make targeted changes. The caffeine cutoff time was a big one for me too — moved it from 4pm to noon and my deep sleep almost doubled.",
-      angle: 'Adding value to existing discussion with tracking insight', brandMentionType: 'indirect', confidenceScore: 90,
+      comment: "This is great advice. One thing I would add is tracking your sleep stages, not just total hours. I was getting 8 hours but turns out most of it was light sleep. I started using iSleep which is this EEG headband and once I could see the actual data it changed everything. The caffeine cutoff time was a big one for me too — moved it from 4pm to noon and my deep sleep almost doubled. Small changes but you need the data to know what to fix.",
+      angle: 'Adding value to existing discussion with tracking insight', brandMentionType: 'direct', confidenceScore: 90,
       alignment: { aligned: true, score: 91, issues: [], spamRisk: 'low' },
     },
   ],
@@ -81,18 +81,21 @@ const mockStrategyData = {
       body: "I have been obsessively tracking my sleep for the past 6 months using a headband tracker that measures actual brainwaves (EEG). Here is what surprised me:\n\n1. My \"8 hours\" was mostly light sleep — only 35-50 min of deep sleep per night\n2. Caffeine at 2pm was still affecting my deep sleep at midnight\n3. Late workouts (after 8pm) boosted deep sleep but killed REM\n4. Alcohol even 1-2 drinks practically eliminated deep sleep\n5. Room temperature between 65-68F was the sweet spot\n\nThe biggest game changer was cutting caffeine before noon. Deep sleep went from ~45 min to 1.5 hours within 2 weeks.\n\nAnyone else tracking sleep stages? What patterns have you found?",
       brandMentionStrategy: 'Post establishes credibility with EEG tracking. Follow-up comment can mention iSleep by name when someone asks which headband tracker.',
       engagementPotential: 'high',
+      followUpComment: "A few people asking which headband I use — it is the iSleep. Uses EEG sensors so you get actual brainwave data, not estimates. The app is not perfect but the sleep stage accuracy is way better than what I was getting from my Fitbit. Happy to answer specific questions about it.",
     },
     {
       subreddit: 'r/biohackers', postType: 'resource', title: 'EEG vs accelerometer for sleep tracking — what the research says',
       body: "Been doing a deep dive on sleep tracking accuracy and wanted to share what I found:\n\n**Accelerometer-based (wrist/ring):**\n- Good at detecting when you are asleep vs awake\n- Estimates sleep stages from movement + HRV\n- Accuracy for sleep stages: ~60-70% vs polysomnography\n- Pros: comfortable, 24/7 wear, multi-metric\n\n**EEG-based (headband):**\n- Measures actual brainwave patterns\n- Direct measurement of sleep stages, not estimates\n- Accuracy for sleep stages: ~85-90% vs polysomnography\n- Pros: clinical-grade data. Cons: sleep-only, takes adjustment\n\n**Key studies:**\n- de Zambotti et al. (2019) showed consumer EEG devices tracked deep sleep within 10% of lab results\n- Beattie et al. (2017) found accelerometer devices overestimated light sleep by 20-30%\n\nIf you just want general health tracking, wrist/ring is fine. If you are specifically trying to optimize sleep architecture, EEG seems significantly more accurate.\n\nWhat is everyone using and what has your experience been?",
       brandMentionStrategy: 'Educational post creates natural opening for someone to ask \"which EEG headband do you use?\" — respond with iSleep recommendation.',
       engagementPotential: 'high',
+      followUpComment: "Since a lot of you are asking — I personally use iSleep for the EEG side. It lines up with the de Zambotti study I linked, around 85-90% accuracy for sleep stages in my experience. The consumer EEG space is still pretty small so there are not a ton of options but this one has been solid for me.",
     },
     {
       subreddit: 'r/insomnia', postType: 'question', title: 'Has tracking your sleep actually helped with insomnia, or just made anxiety worse?',
       body: "Genuine question for this community. I have seen mixed takes on sleep tracking for people with insomnia:\n\n**The case for tracking:**\n- Identifies specific patterns (caffeine, screen time, exercise timing)\n- Provides objective data instead of \"I feel like I did not sleep\"\n- Can validate improvement over time\n\n**The case against:**\n- Orthosomnia — anxiety about sleep scores making sleep worse\n- Checking data obsessively\n- Feeling defeated when numbers are bad\n\nI have been using a sleep tracker for a few months and honestly it has been mostly positive — seeing the actual data helped me stop catastrophizing (\"I only got 5 hours\" when I actually got 6.5). But I can see how it could go the other way.\n\nWhat has been your experience? Has tracking helped or hurt your insomnia?",
       brandMentionStrategy: 'Balanced discussion post. Follow up in comments with personal experience using iSleep — mention that seeing objective data reduced sleep anxiety.',
       engagementPotential: 'high',
+      followUpComment: "To answer my own question — tracking has actually helped me. I use iSleep and the biggest benefit was seeing that I was getting more sleep than I thought. Before tracking I would lay there convinced I was awake for hours but the EEG data showed I was actually drifting in and out of light sleep. Seeing that objective data reduced a lot of the anxiety spiral for me.",
     },
   ],
   aiCitations: [
@@ -199,12 +202,11 @@ async function main() {
   console.log('\nSheets included:');
   console.log('  1. Executive Summary');
   console.log('  2. Thread Discovery (6 threads)');
-  console.log('  3. Comment Drafts (5 comments)');
-  console.log('  4. Post Drafts (3 posts)');
+  console.log('  3. Comment Drafts (5 comments — all mention iSleep by name)');
+  console.log('  4. Post Drafts (3 posts + follow-up comments with brand mention)');
   console.log('  5. Upvote Plan (45 upvotes across 8 items)');
   console.log('  6. Subreddit Strategy (5 subreddits)');
-  console.log('  7. Brand Alignment (8.4/10 brand, 8.1/10 Reddit BP)');
-  console.log('  8. Reporting Tracker (Month 1 placeholder + Month 2 data)');
+  console.log('  7. Reporting Tracker (Month 1 placeholder + Month 2 data)');
 }
 
 main().catch(console.error);
