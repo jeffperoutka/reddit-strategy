@@ -1,10 +1,11 @@
 {
-  "name": "reddit-strategy",
-  "version": "1.1.0",
-  "description": "Sally the Reddit Bot — discovers threads, crafts comments, checks brand alignment, manages QA approval, generates client spreadsheets",
+  "name": "george-reddit-bot",
+  "version": "2.0.0",
+  "description": "George Reddit Bot — discovers threads, crafts comments/posts, checks brand alignment, manages QA approval, generates Google Sheets reports",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "@vercel/functions": "^1.4.0",
-    "exceljs": "^4.4.0"
+    "exceljs": "^4.4.0",
+    "googleapis": "^171.4.0"
   }
 }

@@ -185,7 +185,7 @@ async function main() {
   const formData = {
     month: '2',
     prevSpreadsheetUrl: 'https://docs.google.com/spreadsheets/d/example-month1-report',
-    packageName: 'Package B — Authority',
+    packageName: 'Package B',
   };
 
   const buffer = await buildStrategySpreadsheet(mockStrategyData, mockBrandProfile, 'b', formData);

@@ -48,19 +48,30 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
     });
 
     // ── Package Selection ──
-    const packageOptions = getPackageOptions().map(p => ({
-      text: { type: 'plain_text', text: p.name },
-      value: p.key,
-    }));
+    const { PACKAGES } = require('../../lib/packages');
+    const packageOptions = [
+      {
+        text: { type: 'plain_text', text: `Package A — 15 posts, 50 comments, 150 upvotes` },
+        value: 'a',
+      },
+      {
+        text: { type: 'plain_text', text: `Package B — 30 posts, 65 comments, 150 upvotes` },
+        value: 'b',
+      },
+      {
+        text: { type: 'plain_text', text: `Custom Scope` },
+        value: 'custom',
+      },
+    ];
 
     blocks.push({
       type: 'input',
       block_id: 'package_block',
-      label: { type: 'plain_text', text: 'Package Tier' },
+      label: { type: 'plain_text', text: 'Package Scope' },
       element: {
         type: 'static_select',
         action_id: 'package_select',
-        placeholder: { type: 'plain_text', text: 'Select package...' },
+        placeholder: { type: 'plain_text', text: 'Select scope...' },
         options: packageOptions,
       },
     });
@@ -90,13 +101,13 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
     blocks.push({
       type: 'input',
       block_id: 'prev_spreadsheet_block',
-      label: { type: 'plain_text', text: 'Previous Month Spreadsheet URL' },
+      label: { type: 'plain_text', text: 'Previous Month Google Sheet' },
       optional: true,
-      hint: { type: 'plain_text', text: 'Paste the Google Sheets or file URL from last month so Sally can build on the existing tracker.' },
+      hint: { type: 'plain_text', text: 'Paste last month\'s Google Sheet URL. George will append new month tabs to the same file.' },
       element: {
         type: 'url_text_input',
         action_id: 'prev_spreadsheet_input',
-        placeholder: { type: 'plain_text', text: 'https://docs.google.com/spreadsheets/d/... (Month 2+ only)' },
+        placeholder: { type: 'plain_text', text: 'https://docs.google.com/spreadsheets/d/...' },
       },
     });
 
@@ -144,7 +155,7 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
       type: 'modal',
       callback_id: 'reddit_strategy_submit',
       private_metadata: JSON.stringify({ channel_id: channelId || '' }),
-      title: { type: 'plain_text', text: 'Sally — Reddit Strategy' },
+      title: { type: 'plain_text', text: 'George — Reddit Strategy' },
       submit: { type: 'plain_text', text: 'Run Strategy' },
       close: { type: 'plain_text', text: 'Cancel' },
       blocks,
