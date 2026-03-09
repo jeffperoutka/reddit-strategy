@@ -7,9 +7,6 @@ const { getBrandProfile } = require('../../lib/brand-context');
 const { buildStrategySpreadsheet } = require('../../lib/spreadsheet');
 const { buildGoogleSheetsReport } = require('../../lib/google-spreadsheet');
 
-// ── In-memory store for pending strategies ──
-const pendingStrategies = new Map();
-
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -37,42 +34,7 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    if (callbackId === 'edit_comment_submit') {
-      res.status(200).json({ response_action: 'clear' });
-      waitUntil(handleEditComment(payload));
-      return;
-    }
-
     return res.status(200).json({ response_action: 'clear' });
-  }
-
-  // ── Button Clicks ──
-  if (payload.type === 'block_actions') {
-    const action = payload.actions?.[0];
-    if (!action) return res.status(200).json({ ok: true });
-
-    res.status(200).json({ ok: true });
-
-    const actionId = action.action_id;
-
-    if (actionId.startsWith('approve_comment_')) {
-      waitUntil(handleApproveComment(payload, action));
-    } else if (actionId.startsWith('edit_comment_')) {
-      waitUntil(handleEditCommentButton(payload, action));
-    } else if (actionId.startsWith('reject_comment_')) {
-      waitUntil(handleRejectComment(payload, action));
-    } else if (actionId.startsWith('approve_post_')) {
-      waitUntil(handleApprovePost(payload, action));
-    } else if (actionId.startsWith('reject_post_')) {
-      waitUntil(handleRejectPost(payload, action));
-    } else if (actionId === 'approve_all_comments') {
-      waitUntil(handleApproveAll(payload));
-    } else if (actionId === 'approve_all_campaign') {
-      waitUntil(handleApproveAllCampaign(payload));
-    } else if (actionId === 'send_to_vendor') {
-      waitUntil(handleSendToVendor(payload));
-    }
-    return;
   }
 
   return res.status(200).json({ ok: true });
@@ -107,7 +69,6 @@ async function buildClientSuggestions(query) {
         );
 
         for (const doc of clientDocs) {
-          // Strip "Client Info Doc" suffix to get clean client name
           const name = doc.name
             .replace(/\s*(client\s+)?info(\s+doc)?(\s+template)?$/i, '')
             .trim();
@@ -162,14 +123,14 @@ async function buildClientSuggestions(query) {
   // Allow adding new clients
   if (query && !options.some(o => o.value === query.replace(/\s/g, '-'))) {
     options.push({
-      text: { type: 'plain_text', text: `➕ New client: ${titleCase(query)}` },
+      text: { type: 'plain_text', text: `+ New client: ${titleCase(query)}` },
       value: `__new__:${query}`,
     });
   }
 
   if (options.length === 0) {
     options.push({
-      text: { type: 'plain_text', text: '📝 Type a client name...' },
+      text: { type: 'plain_text', text: 'Type a client name...' },
       value: '__empty__',
     });
   }
@@ -218,53 +179,41 @@ async function handleStrategyRun(payload) {
   let channel = metadata.channel_id || process.env.SLACK_CHANNEL_ID;
   let parentMsg;
 
-  // ── Send immediate acknowledgement to the user ──
+  // ── Send immediate DM acknowledgement ──
   try {
     const ackChannel = await slack.openDM(userId);
     await slack.postMessage(ackChannel, [
-      `🤖 *Hey! George here.* Your Reddit strategy run just kicked off!`,
-      ``,
-      `*Client:* ${titleCase(clientName)}`,
-      `*Package:* ${pkg?.name || packageTier}`,
-      `*Month:* ${campaignMonth}`,
-      customKeywords ? `*Keywords:* ${customKeywords}` : '',
-      ``,
-      `I'll post the full results in <#${channel}> when I'm done. Hang tight — this usually takes 2-3 minutes. ⏳`,
-    ].filter(Boolean).join('\n'));
+      `*George here.* Reddit strategy kicked off for *${titleCase(clientName)}*.`,
+      `Package: ${pkg?.name || packageTier} | Month ${campaignMonth}`,
+      `I'll post the Google Sheet in <#${channel}> when it's ready (2-3 min).`,
+    ].join('\n'));
   } catch (ackErr) {
-    console.error('Acknowledgement DM failed:', ackErr.message, '— continuing anyway');
+    console.error('Acknowledgement DM failed:', ackErr.message);
   }
 
-  const recapLines = [
-    `🎯 *Reddit Strategy Run*`,
-    ``,
-    `*Client:* ${titleCase(clientName)}`,
-    `*Package:* ${pkg?.name || packageTier}`,
-    `*Month:* ${campaignMonth}`,
-    customKeywords ? `*Keywords:* ${customKeywords}` : '',
-    targetSubreddits ? `*Target Subreddits:* ${targetSubreddits}` : '',
-    notes ? `*Notes:* ${notes.slice(0, 200)}` : '',
-    prevSpreadsheetUrl ? `*Previous Month Report:* ${prevSpreadsheetUrl}` : '',
+  // ── Post thread header in channel ──
+  const headerText = [
+    `*Reddit Strategy — ${titleCase(clientName)}*`,
+    `Package: ${pkg?.name || packageTier} | Month ${campaignMonth}`,
+    prevSpreadsheetUrl ? `Previous report: ${prevSpreadsheetUrl}` : '',
   ].filter(Boolean).join('\n');
 
   try {
     await slack.joinChannel(channel).catch(() => {});
-    parentMsg = await slack.postMessage(channel, recapLines);
+    parentMsg = await slack.postMessage(channel, headerText);
     if (!parentMsg.ok) throw new Error(parentMsg.error);
   } catch (err) {
-    console.error(`Channel post failed (${channel}):`, err.message, '— trying fallbacks');
-    // Fallback 1: try DM
+    console.error(`Channel post failed (${channel}):`, err.message);
     try {
       channel = await slack.openDM(userId);
-      parentMsg = await slack.postMessage(channel, recapLines);
+      parentMsg = await slack.postMessage(channel, headerText);
       if (!parentMsg.ok) throw new Error(parentMsg.error);
     } catch (dmErr) {
-      console.error('DM fallback failed:', dmErr.message, '— trying public channel');
-      // Fallback 2: find and post to a public channel
+      console.error('DM fallback failed:', dmErr.message);
       try {
         channel = await slack.findPublicChannel();
         await slack.joinChannel(channel).catch(() => {});
-        parentMsg = await slack.postMessage(channel, recapLines);
+        parentMsg = await slack.postMessage(channel, headerText);
         if (!parentMsg.ok) throw new Error(parentMsg.error);
       } catch (pubErr) {
         console.error('Public channel fallback failed:', pubErr.message);
@@ -274,16 +223,16 @@ async function handleStrategyRun(payload) {
   }
 
   const threadTs = parentMsg.ts;
-  const threadPost = async (text, opts = {}) => slack.postMessage(channel, text, { threadTs, ...opts });
+  const threadPost = async (text) => slack.postMessage(channel, text, { threadTs });
 
   try {
-    // Progress message
-    const progressMsg = await threadPost('⏳ George is starting your Reddit strategy...');
+    // Progress message (updated in-place)
+    const progressMsg = await threadPost('George is working on this...');
     const progressTs = progressMsg.ts;
 
     const updateProgress = async (stepText) => {
       try {
-        await slack.updateMessage(channel, progressTs, `⏳ ${stepText}`);
+        await slack.updateMessage(channel, progressTs, stepText);
       } catch (err) {
         console.error('Progress update failed:', err.message);
       }
@@ -295,12 +244,12 @@ async function handleStrategyRun(payload) {
 
     if (!brandProfile) {
       await slack.updateMessage(channel, progressTs,
-        `❌ Could not find brand profile for "${titleCase(clientName)}". Please run \`/brand-check\` first to build the brand profile, or provide a website URL.`
+        `Could not find brand profile for "${titleCase(clientName)}". Run /brand-check first or provide a website URL.`
       );
       return;
     }
 
-    await updateProgress(`Brand profile loaded for ${brandProfile.clientName}. Starting pipeline...`);
+    await updateProgress(`Brand profile loaded. Running strategy pipeline...`);
 
     // Run the full strategy pipeline
     const strategyData = await runStrategyPipeline(
@@ -310,730 +259,86 @@ async function handleStrategyRun(payload) {
       updateProgress
     );
 
-    // Update progress to complete
-    await slack.updateMessage(channel, progressTs, '✅ Strategy pipeline complete. Preparing results...');
-
-    // Store strategy data for approval flow
-    pendingStrategies.set(threadTs, {
-      clientName: titleCase(clientName),
-      packageTier,
-      strategyData,
-      brandProfile,
-      channel,
-      campaignMonth,
-      prevSpreadsheetUrl,
-      approvedComments: new Set(),
-      rejectedComments: new Set(),
-      approvedPosts: new Set(),
-      rejectedPosts: new Set(),
-    });
-
-    // Post strategy report
-    await postStrategyReport(channel, threadTs, strategyData, titleCase(clientName), packageTier);
-
-    // Post comment review cards
-    if (strategyData.commentsWithAlignment?.length > 0) {
-      await postCommentReviewCards(channel, threadTs, strategyData.commentsWithAlignment);
-    }
-
-    // Post review cards for posts (Package B & C)
-    if (strategyData.posts?.length > 0) {
-      await postPostReviewCards(channel, threadTs, strategyData.posts);
-    }
-
-    // Post brand alignment & best practices summary
-    if (strategyData.brandAlignmentReport || strategyData.bestPracticesReport) {
-      await postReviewSummary(channel, threadTs, strategyData);
-    }
-
-    // Post upvote plan summary
-    if (strategyData.upvotePlan?.totalUpvotes > 0) {
-      await postUpvotePlanSummary(channel, threadTs, strategyData.upvotePlan);
-    }
-
-    // Client approval CTA
-    await postClientApprovalCTA(channel, threadTs, strategyData, titleCase(clientName));
+    await updateProgress('Pipeline complete. Building Google Sheet...');
 
     // ── Build Google Sheets report ──
+    const isAppend = prevSpreadsheetUrl && parseInt(campaignMonth) > 1;
+    const formData = {
+      month: campaignMonth,
+      prevSpreadsheetUrl,
+      packageName: pkg?.name || packageTier,
+    };
+
+    let sheetsUrl;
     try {
-      const isAppend = prevSpreadsheetUrl && parseInt(campaignMonth) > 1;
-      const sheetAction = isAppend ? 'Appending to existing' : 'Creating new';
-      await threadPost(`📊 ${sheetAction} Google Sheets report...`);
-
-      const formData = {
-        month: campaignMonth,
-        prevSpreadsheetUrl,
-        packageName: pkg?.name || packageTier,
-      };
-
-      const sheetsUrl = await buildGoogleSheetsReport(
+      sheetsUrl = await buildGoogleSheetsReport(
         strategyData,
         brandProfile,
         packageTier,
         formData
       );
-
-      const appendNote = isAppend
-        ? `\n_Month ${campaignMonth} data appended to existing report. New tabs: M${campaignMonth} Threads, M${campaignMonth} Comments, M${campaignMonth} Posts._`
-        : '';
-
-      await threadPost(
-        `📎 *${titleCase(clientName)} — Reddit Strategy Report (${pkg?.name || packageTier}, Month ${campaignMonth})*\n` +
-        `Client-ready Google Sheet with editing access:\n${sheetsUrl}${appendNote}`
-      );
     } catch (sheetErr) {
       console.error('Google Sheets generation failed:', sheetErr.message, sheetErr.stack);
-      await threadPost(`⚠️ Google Sheets generation failed: ${sheetErr.message}. The Slack report above is still complete.`);
 
       // Fallback: generate XLSX and upload
       try {
-        const formData = { month: campaignMonth, prevSpreadsheetUrl, packageName: pkg?.name || packageTier };
         const xlsxBuffer = await buildStrategySpreadsheet(strategyData, brandProfile, packageTier, formData);
         const filename = `Reddit_Strategy_${titleCase(clientName).replace(/\s+/g, '_')}_Month${campaignMonth}.xlsx`;
         await slack.uploadFile(xlsxBuffer, filename, channel, {
-          threadTs, initialComment: `📎 Fallback XLSX report (Google Sheets unavailable)`,
+          threadTs, initialComment: 'Google Sheets failed — here is the XLSX fallback.',
         });
+        await slack.updateMessage(channel, progressTs, 'Done (XLSX fallback — Google Sheets auth issue).');
+        return;
       } catch (fallbackErr) {
         console.error('XLSX fallback also failed:', fallbackErr.message);
+        await slack.updateMessage(channel, progressTs, `Report generation failed: ${sheetErr.message}`);
+        return;
       }
     }
+
+    // ── Post final summary with Google Sheet link ──
+    const commentCount = strategyData.commentsWithAlignment?.length || 0;
+    const postCount = strategyData.posts?.length || 0;
+    const threadCount = strategyData.threads?.length || 0;
+    const upvoteCount = strategyData.upvotePlan?.totalUpvotes || 0;
+
+    const deliverables = [
+      `${threadCount} threads`,
+      `${commentCount} comments`,
+      postCount > 0 ? `${postCount} posts` : null,
+      upvoteCount > 0 ? `${upvoteCount} upvotes` : null,
+    ].filter(Boolean).join(', ');
+
+    const appendNote = isAppend
+      ? `Month ${campaignMonth} tabs appended to existing sheet.`
+      : 'New spreadsheet created with editing access.';
+
+    // Update progress to done
+    await slack.updateMessage(channel, progressTs, 'Done.');
+
+    // Post the deliverable
+    await threadPost([
+      `*${titleCase(clientName)} — Reddit Strategy (${pkg?.name || packageTier}, Month ${campaignMonth})*`,
+      ``,
+      `${deliverables}`,
+      `${appendNote}`,
+      ``,
+      `${sheetsUrl}`,
+      ``,
+      `_Review and make changes directly in the sheet. Highlight anything to discuss._`,
+    ].join('\n'));
 
   } catch (err) {
     console.error('handleStrategyRun error:', err.message, err.stack);
     try {
-      await threadPost(`❌ Strategy run failed: ${err.message}`);
+      await threadPost(`Strategy run failed: ${err.message}`);
     } catch (e) {
       console.error('Failed to post error:', e.message);
     }
   }
 }
 
-// ─── Post Strategy Report ───
-
-async function postStrategyReport(channel, threadTs, data, clientName, packageTier) {
-  const report = data.report || {};
-  const pkg = getPackage(packageTier);
-
-  const blocks = [];
-
-  blocks.push({ type: 'header', text: { type: 'plain_text', text: `📊 Reddit Strategy Report: ${clientName}` } });
-
-  // Executive Summary
-  blocks.push({
-    type: 'section',
-    text: { type: 'mrkdwn', text: `*Package:* ${pkg?.name || packageTier}\n\n${report.executiveSummary || 'No summary available.'}` },
-  });
-
-  blocks.push({ type: 'divider' });
-
-  // Top Opportunities
-  if (report.topOpportunities?.length > 0) {
-    let oppText = '*🎯 Top Thread Opportunities:*\n';
-    for (const opp of report.topOpportunities.slice(0, 5)) {
-      oppText += `\n• *<${opp.url}|${opp.title?.slice(0, 60)}>* (${opp.subreddit})\n  Score: ${opp.score} — ${opp.opportunity?.slice(0, 120)}`;
-    }
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: oppText } });
-  }
-
-  blocks.push({ type: 'divider' });
-
-  // Subreddit Strategy
-  if (report.subredditStrategy?.length > 0) {
-    let subText = '*🗺️ Subreddit Strategy:*\n';
-    for (const sub of report.subredditStrategy.slice(0, 5)) {
-      const emoji = sub.priority === 'high' ? '🔴' : sub.priority === 'medium' ? '🟡' : '🟢';
-      subText += `\n${emoji} *${sub.subreddit}* (${sub.archetype || 'General'})\n  ${sub.approach?.slice(0, 120)}`;
-    }
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: subText } });
-  }
-
-  blocks.push({ type: 'divider' });
-
-  // Recommended Actions
-  if (report.recommendedActions?.length > 0) {
-    let actText = '*📋 Recommended Actions:*\n';
-    for (const act of report.recommendedActions.slice(0, 5)) {
-      const emoji = act.priority === 'high' ? '🔴' : act.priority === 'medium' ? '🟡' : '🟢';
-      actText += `\n${emoji} ${act.action} _(${act.timeline || 'this sprint'})_`;
-    }
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: actText } });
-  }
-
-  // Risk Assessment
-  if (report.riskAssessment) {
-    blocks.push({ type: 'divider' });
-    const riskEmoji = report.riskAssessment.overallRisk === 'high' ? '🔴' : report.riskAssessment.overallRisk === 'medium' ? '🟡' : '🟢';
-    let riskText = `*${riskEmoji} Risk Level: ${(report.riskAssessment.overallRisk || 'unknown').toUpperCase()}*`;
-    if (report.riskAssessment.risks?.length > 0) {
-      riskText += '\n' + report.riskAssessment.risks.slice(0, 3).map(r => `• ${r.risk}: _${r.mitigation}_`).join('\n');
-    }
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: riskText } });
-  }
-
-  // Footer
-  const footerParts = [
-    `${data.threads?.length || 0} threads discovered`,
-    `${data.commentsWithAlignment?.length || 0} comments drafted`,
-    data.posts?.length > 0 ? `${data.posts.length} posts drafted` : null,
-    `${data.keywords?.length || 0} keywords researched`,
-    data.upvotePlan?.totalUpvotes ? `${data.upvotePlan.totalUpvotes} upvotes planned` : null,
-    'Generated by George Reddit Bot',
-  ].filter(Boolean);
-
-  blocks.push({
-    type: 'context',
-    elements: [{ type: 'mrkdwn', text: `_${footerParts.join(' • ')}_` }],
-  });
-
-  // Cap blocks
-  if (blocks.length > 49) blocks.length = 49;
-
-  const fallback = `📊 Reddit Strategy for ${clientName}: ${report.executiveSummary?.slice(0, 200) || 'Complete'}`;
-  await slack.postMessage(channel, fallback, { threadTs, blocks });
-}
-
-// ─── Post Comment Review Cards ───
-
-async function postCommentReviewCards(channel, threadTs, comments) {
-  // Header
-  await slack.postMessage(channel, '📝 *Comment Drafts for Review*\nApprove, edit, or reject each comment below.', { threadTs });
-
-  for (let i = 0; i < comments.length && i < 20; i++) {
-    const c = comments[i];
-    const alignment = c.alignment || {};
-    const alignEmoji = alignment.aligned ? '✅' : '⚠️';
-    const spamEmoji = alignment.spamRisk === 'high' ? '🔴' : alignment.spamRisk === 'medium' ? '🟡' : '🟢';
-
-    const blocks = [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Comment ${i + 1}* — ${c.subreddit || 'Unknown'}\n*Thread:* <${c.threadUrl}|${c.threadTitle?.slice(0, 50)}>\n*Angle:* ${c.angle || 'General'}\n${alignEmoji} Alignment: ${alignment.score || '?'}% • ${spamEmoji} Spam Risk: ${alignment.spamRisk || 'unknown'}`,
-        },
-      },
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: `\`\`\`${c.comment?.slice(0, 2500)}\`\`\`` },
-      },
-    ];
-
-    // Add alignment issues if any
-    if (alignment.issues?.length > 0) {
-      blocks.push({
-        type: 'context',
-        elements: [{ type: 'mrkdwn', text: `⚠️ _Issues: ${alignment.issues.join(', ')}_` }],
-      });
-    }
-
-    // Action buttons
-    blocks.push({
-      type: 'actions',
-      elements: [
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '✅ Approve' },
-          style: 'primary',
-          action_id: `approve_comment_${i}`,
-          value: String(i),
-        },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '✏️ Edit' },
-          action_id: `edit_comment_${i}`,
-          value: String(i),
-        },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '❌ Reject' },
-          style: 'danger',
-          action_id: `reject_comment_${i}`,
-          value: String(i),
-        },
-      ],
-    });
-
-    await slack.postMessage(channel, `Comment ${i + 1}: ${c.comment?.slice(0, 100)}...`, { threadTs, blocks });
-  }
-
-  // Bulk actions at the end
-  const bulkBlocks = [
-    { type: 'divider' },
-    {
-      type: 'actions',
-      elements: [
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '✅ Approve All' },
-          style: 'primary',
-          action_id: 'approve_all_comments',
-          value: 'all',
-        },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '📤 Send to Vendor' },
-          action_id: 'send_to_vendor',
-          value: 'vendor',
-        },
-      ],
-    },
-  ];
-
-  await slack.postMessage(channel, 'Bulk actions:', { threadTs, blocks: bulkBlocks });
-}
-
-// ─── Button Handlers ───
-
-async function handleApproveComment(payload, action) {
-  const channel = payload.channel?.id;
-  const messageTs = payload.message?.ts;
-  const threadTs = payload.message?.thread_ts;
-  const idx = parseInt(action.value);
-
-  const strategy = findStrategyByThread(threadTs);
-  if (strategy) strategy.approvedComments.add(idx);
-
-  // Strip action buttons and add approval badge
-  const blocks = stripActionBlocks(payload.message?.blocks || []);
-  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `✅ *Approved* by <@${payload.user?.id}> at ${new Date().toLocaleTimeString()}` }] });
-
-  try {
-    await slack.updateMessage(channel, messageTs, `Comment ${idx + 1} approved`, blocks);
-  } catch (err) {
-    console.error('Approve update failed:', err.message);
-  }
-}
-
-async function handleEditCommentButton(payload, action) {
-  const triggerId = payload.trigger_id;
-  const threadTs = payload.message?.thread_ts;
-  const messageTs = payload.message?.ts;
-  const idx = parseInt(action.value);
-
-  const strategy = findStrategyByThread(threadTs);
-  const comment = strategy?.strategyData?.commentsWithAlignment?.[idx];
-
-  const modal = {
-    type: 'modal',
-    callback_id: 'edit_comment_submit',
-    private_metadata: JSON.stringify({ threadTs, messageTs, index: idx, channel: payload.channel?.id }),
-    title: { type: 'plain_text', text: 'Edit Comment' },
-    submit: { type: 'plain_text', text: 'Save' },
-    close: { type: 'plain_text', text: 'Cancel' },
-    blocks: [
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: `*Thread:* ${comment?.threadTitle || 'Unknown'}\n*Subreddit:* ${comment?.subreddit || 'Unknown'}` },
-      },
-      {
-        type: 'input',
-        block_id: 'comment_block',
-        label: { type: 'plain_text', text: 'Comment Text' },
-        element: {
-          type: 'plain_text_input',
-          action_id: 'comment_input',
-          multiline: true,
-          initial_value: comment?.comment || '',
-        },
-      },
-    ],
-  };
-
-  await slack.openModal(triggerId, modal);
-}
-
-async function handleEditComment(payload) {
-  const values = payload.view?.state?.values;
-  const meta = JSON.parse(payload.view?.private_metadata || '{}');
-  const newComment = values?.comment_block?.comment_input?.value;
-
-  const strategy = findStrategyByThread(meta.threadTs);
-  if (strategy && strategy.strategyData.commentsWithAlignment[meta.index]) {
-    strategy.strategyData.commentsWithAlignment[meta.index].comment = newComment;
-  }
-
-  // Update the message to show edited comment
-  try {
-    const blocks = [
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: `*Comment ${meta.index + 1}* — _edited_` },
-      },
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: `\`\`\`${newComment?.slice(0, 2500)}\`\`\`` },
-      },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '✅ Approve' },
-            style: 'primary',
-            action_id: `approve_comment_${meta.index}`,
-            value: String(meta.index),
-          },
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '✏️ Edit' },
-            action_id: `edit_comment_${meta.index}`,
-            value: String(meta.index),
-          },
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '❌ Reject' },
-            style: 'danger',
-            action_id: `reject_comment_${meta.index}`,
-            value: String(meta.index),
-          },
-        ],
-      },
-    ];
-
-    await slack.updateMessage(meta.channel, meta.messageTs, `Comment ${meta.index + 1} (edited)`, blocks);
-  } catch (err) {
-    console.error('Edit comment update failed:', err.message);
-  }
-}
-
-async function handleRejectComment(payload, action) {
-  const channel = payload.channel?.id;
-  const messageTs = payload.message?.ts;
-  const threadTs = payload.message?.thread_ts;
-  const idx = parseInt(action.value);
-
-  const strategy = findStrategyByThread(threadTs);
-  if (strategy) strategy.rejectedComments.add(idx);
-
-  const blocks = stripActionBlocks(payload.message?.blocks || []);
-  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `❌ *Rejected* by <@${payload.user?.id}>` }] });
-
-  try {
-    await slack.updateMessage(channel, messageTs, `Comment ${idx + 1} rejected`, blocks);
-  } catch (err) {
-    console.error('Reject update failed:', err.message);
-  }
-}
-
-async function handleApproveAll(payload) {
-  const channel = payload.channel?.id;
-  const threadTs = payload.message?.thread_ts;
-
-  const strategy = findStrategyByThread(threadTs);
-  if (!strategy) {
-    await slack.postMessage(channel, '⚠️ Strategy data expired. Please re-run the strategy.', { threadTs });
-    return;
-  }
-
-  const total = strategy.strategyData.commentsWithAlignment?.length || 0;
-  for (let i = 0; i < total; i++) {
-    strategy.approvedComments.add(i);
-  }
-
-  await slack.postMessage(channel, `✅ All ${total} comments approved by <@${payload.user?.id}>. Ready for vendor handoff.`, { threadTs });
-}
-
-async function handleSendToVendor(payload) {
-  const channel = payload.channel?.id;
-  const threadTs = payload.message?.thread_ts;
-
-  const strategy = findStrategyByThread(threadTs);
-  if (!strategy) {
-    await slack.postMessage(channel, '⚠️ Strategy data expired. Please re-run.', { threadTs });
-    return;
-  }
-
-  const approved = strategy.strategyData.commentsWithAlignment?.filter((_, i) =>
-    strategy.approvedComments.has(i) && !strategy.rejectedComments.has(i)
-  ) || [];
-
-  if (approved.length === 0) {
-    await slack.postMessage(channel, '⚠️ No approved comments to send. Approve comments first.', { threadTs });
-    return;
-  }
-
-  // Format for vendor
-  let vendorBrief = `*📤 Vendor Brief: ${strategy.clientName}*\n*Package:* ${getPackage(strategy.packageTier)?.name || strategy.packageTier}\n*Date:* ${new Date().toISOString().split('T')[0]}\n\n`;
-
-  for (let i = 0; i < approved.length; i++) {
-    const c = approved[i];
-    vendorBrief += `───────────────────\n`;
-    vendorBrief += `*Comment ${i + 1}*\n`;
-    vendorBrief += `*Thread:* ${c.threadUrl}\n`;
-    vendorBrief += `*Subreddit:* ${c.subreddit}\n`;
-    vendorBrief += `*Comment:*\n${c.comment}\n\n`;
-  }
-
-  vendorBrief += `───────────────────\n*Total: ${approved.length} comments ready for posting*\n\n`;
-
-  // Include approved posts
-  const approvedPosts = strategy.strategyData.posts?.filter((_, i) =>
-    strategy.approvedPosts?.has(i)
-  ) || [];
-
-  if (approvedPosts.length > 0) {
-    vendorBrief += `\n*📝 POSTS TO CREATE:*\n\n`;
-    for (let i = 0; i < approvedPosts.length; i++) {
-      const p = approvedPosts[i];
-      vendorBrief += `───────────────────\n`;
-      vendorBrief += `*Post ${i + 1}*\n`;
-      vendorBrief += `*Subreddit:* ${p.subreddit}\n`;
-      vendorBrief += `*Type:* ${p.postType}\n`;
-      vendorBrief += `*Title:* ${p.title}\n`;
-      vendorBrief += `*Body:*\n${p.body}\n`;
-      vendorBrief += `*Brand Mention Strategy:* ${p.brandMentionStrategy}\n\n`;
-    }
-    vendorBrief += `───────────────────\n*Total: ${approvedPosts.length} posts to create*\n\n`;
-  }
-
-  // Include upvote plan
-  const upvotePlan = strategy.strategyData.upvotePlan;
-  if (upvotePlan?.totalUpvotes > 0) {
-    vendorBrief += `\n*⬆️ UPVOTE PLAN: ${upvotePlan.totalUpvotes} total upvotes*\n`;
-    if (upvotePlan.distribution?.length > 0) {
-      for (const item of upvotePlan.distribution) {
-        vendorBrief += `• ${item.contentType}: ${item.target?.slice(0, 50)} — ${item.upvotes} upvotes (${item.timing})\n`;
-      }
-    }
-    if (upvotePlan.timingRecommendations) {
-      vendorBrief += `_Timing guidance: ${upvotePlan.timingRecommendations}_\n`;
-    }
-  }
-
-  await slack.postMessage(channel, vendorBrief, { threadTs });
-
-  const totalItems = approved.length + approvedPosts.length;
-  const upvoteNote = upvotePlan?.totalUpvotes ? ` + ${upvotePlan.totalUpvotes} upvotes` : '';
-  await slack.postMessage(channel, `✅ Vendor brief generated: ${approved.length} comments, ${approvedPosts.length} posts${upvoteNote}. Forward this thread to your vendor for execution.`, { threadTs });
-}
-
-// ─── Post Review Cards ───
-
-async function postPostReviewCards(channel, threadTs, posts) {
-  await slack.postMessage(channel, '📝 *Post Drafts for Review*\nThese are new Reddit posts to create. Approve or reject each one.', { threadTs });
-
-  for (let i = 0; i < posts.length && i < 15; i++) {
-    const p = posts[i];
-
-    const blocks = [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Post ${i + 1}* — ${p.subreddit || 'Unknown'}\n*Type:* ${p.postType || 'discussion'}\n*Title:* ${p.title || 'Untitled'}`,
-        },
-      },
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: `\`\`\`${(p.body || '').slice(0, 2500)}\`\`\`` },
-      },
-      {
-        type: 'context',
-        elements: [{ type: 'mrkdwn', text: `_Brand mention strategy: ${p.brandMentionStrategy || 'N/A'}_` }],
-      },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '✅ Approve' },
-            style: 'primary',
-            action_id: `approve_post_${i}`,
-            value: String(i),
-          },
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '❌ Reject' },
-            style: 'danger',
-            action_id: `reject_post_${i}`,
-            value: String(i),
-          },
-        ],
-      },
-    ];
-
-    await slack.postMessage(channel, `Post ${i + 1}: ${p.title?.slice(0, 80)}`, { threadTs, blocks });
-  }
-}
-
-// ─── Review Summary ───
-
-async function postReviewSummary(channel, threadTs, strategyData) {
-  const bar = strategyData.brandAlignmentReport;
-  const bpr = strategyData.bestPracticesReport;
-
-  let text = '*🔍 Quality Review Summary*\n\n';
-
-  if (bar) {
-    const emoji = bar.overall_score >= 7 ? '🟢' : bar.overall_score >= 5 ? '🟡' : '🔴';
-    text += `${emoji} *Brand Alignment:* ${bar.overall_score}/10\n`;
-    text += `  Aligned: ${bar.score_distribution?.aligned || 0} | Drift: ${bar.score_distribution?.drift || 0} | Misaligned: ${bar.score_distribution?.misaligned || 0}\n`;
-    if (bar.top_issues?.length > 0) {
-      text += `  _Issues: ${bar.top_issues.slice(0, 3).join('; ')}_\n`;
-    }
-    text += '\n';
-  }
-
-  if (bpr) {
-    const emoji = bpr.overall_score >= 7 ? '🟢' : bpr.overall_score >= 5 ? '🟡' : '🔴';
-    text += `${emoji} *Reddit Best Practices:* ${bpr.overall_score}/10\n`;
-    if (bpr.top_issues?.length > 0) {
-      text += `  _Issues: ${bpr.top_issues.slice(0, 3).join('; ')}_\n`;
-    }
-    if (bpr.recommendations?.length > 0) {
-      text += `  _Recommendations: ${bpr.recommendations.slice(0, 2).join('; ')}_\n`;
-    }
-  }
-
-  await slack.postMessage(channel, text, { threadTs });
-}
-
-// ─── Upvote Plan Summary ───
-
-async function postUpvotePlanSummary(channel, threadTs, upvotePlan) {
-  let text = `*⬆️ Upvote Support Plan — ${upvotePlan.totalUpvotes} total upvotes*\n\n`;
-
-  if (upvotePlan.distribution?.length > 0) {
-    for (const item of upvotePlan.distribution.slice(0, 10)) {
-      text += `• ${item.contentType}: _${item.target?.slice(0, 50)}_ — ${item.upvotes} upvotes (${item.timing || 'standard'})\n`;
-    }
-  }
-
-  if (upvotePlan.timingRecommendations) {
-    text += `\n_Timing: ${upvotePlan.timingRecommendations}_`;
-  }
-
-  await slack.postMessage(channel, text, { threadTs });
-}
-
-// ─── Client Approval CTA ───
-
-async function postClientApprovalCTA(channel, threadTs, strategyData, clientName) {
-  const commentCount = strategyData.commentsWithAlignment?.length || 0;
-  const postCount = strategyData.posts?.length || 0;
-  const upvoteCount = strategyData.upvotePlan?.totalUpvotes || 0;
-
-  let summary = `*📋 Campaign Summary for ${clientName}*\n\n`;
-  summary += `• *${commentCount}* comment drafts ready for review\n`;
-  if (postCount > 0) summary += `• *${postCount}* post drafts ready for review\n`;
-  if (upvoteCount > 0) summary += `• *${upvoteCount}* upvotes planned\n`;
-  summary += `\nReview each item above, then approve the full campaign when ready.`;
-
-  const blocks = [
-    { type: 'section', text: { type: 'mrkdwn', text: summary } },
-    { type: 'divider' },
-    {
-      type: 'actions',
-      elements: [
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '✅ Approve All & Launch' },
-          style: 'primary',
-          action_id: 'approve_all_campaign',
-          value: 'all',
-        },
-        {
-          type: 'button',
-          text: { type: 'plain_text', text: '📤 Send to Vendor' },
-          action_id: 'send_to_vendor',
-          value: 'vendor',
-        },
-      ],
-    },
-  ];
-
-  await slack.postMessage(channel, `Campaign summary for ${clientName}`, { threadTs, blocks });
-}
-
-// ─── Post Button Handlers ───
-
-async function handleApprovePost(payload, action) {
-  const channel = payload.channel?.id;
-  const messageTs = payload.message?.ts;
-  const threadTs = payload.message?.thread_ts;
-  const idx = parseInt(action.value);
-
-  const strategy = findStrategyByThread(threadTs);
-  if (strategy) {
-    if (!strategy.approvedPosts) strategy.approvedPosts = new Set();
-    strategy.approvedPosts.add(idx);
-  }
-
-  const blocks = stripActionBlocks(payload.message?.blocks || []);
-  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `✅ *Post approved* by <@${payload.user?.id}>` }] });
-
-  try {
-    await slack.updateMessage(channel, messageTs, `Post ${idx + 1} approved`, blocks);
-  } catch (err) {
-    console.error('Approve post failed:', err.message);
-  }
-}
-
-async function handleRejectPost(payload, action) {
-  const channel = payload.channel?.id;
-  const messageTs = payload.message?.ts;
-  const threadTs = payload.message?.thread_ts;
-  const idx = parseInt(action.value);
-
-  const strategy = findStrategyByThread(threadTs);
-  if (strategy) {
-    if (!strategy.rejectedPosts) strategy.rejectedPosts = new Set();
-    strategy.rejectedPosts.add(idx);
-  }
-
-  const blocks = stripActionBlocks(payload.message?.blocks || []);
-  blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `❌ *Post rejected* by <@${payload.user?.id}>` }] });
-
-  try {
-    await slack.updateMessage(channel, messageTs, `Post ${idx + 1} rejected`, blocks);
-  } catch (err) {
-    console.error('Reject post failed:', err.message);
-  }
-}
-
-async function handleApproveAllCampaign(payload) {
-  const channel = payload.channel?.id;
-  const threadTs = payload.message?.thread_ts;
-
-  const strategy = findStrategyByThread(threadTs);
-  if (!strategy) {
-    await slack.postMessage(channel, '⚠️ Strategy data expired. Please re-run the strategy.', { threadTs });
-    return;
-  }
-
-  // Approve all comments
-  const commentTotal = strategy.strategyData.commentsWithAlignment?.length || 0;
-  for (let i = 0; i < commentTotal; i++) {
-    strategy.approvedComments.add(i);
-  }
-
-  // Approve all posts
-  if (!strategy.approvedPosts) strategy.approvedPosts = new Set();
-  const postTotal = strategy.strategyData.posts?.length || 0;
-  for (let i = 0; i < postTotal; i++) {
-    strategy.approvedPosts.add(i);
-  }
-
-  let msg = `✅ Full campaign approved by <@${payload.user?.id}>:\n`;
-  msg += `• ${commentTotal} comments approved\n`;
-  if (postTotal > 0) msg += `• ${postTotal} posts approved\n`;
-  if (strategy.strategyData.upvotePlan?.totalUpvotes) {
-    msg += `• ${strategy.strategyData.upvotePlan.totalUpvotes} upvotes authorized\n`;
-  }
-  msg += `\nReady for vendor handoff. Use "Send to Vendor" to generate the brief.`;
-
-  await slack.postMessage(channel, msg, { threadTs });
-}
-
 // ─── Helpers ───
-
-function findStrategyByThread(threadTs) {
-  return pendingStrategies.get(threadTs);
-}
-
-function stripActionBlocks(blocks) {
-  return (blocks || []).filter(b => b.type !== 'actions');
-}
 
 function titleCase(str) {
   return (str || '').replace(/\b\w/g, c => c.toUpperCase());
