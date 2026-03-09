@@ -1,8 +1,7 @@
 const { waitUntil } = require('@vercel/functions');
 const slack = require('../../lib/connectors/slack');
-const github = require('../../lib/connectors/github');
 const { runStrategyPipeline } = require('../../lib/engine');
-const { getPackage, getPackageOptions } = require('../../lib/packages');
+const { getPackage } = require('../../lib/packages');
 const { getBrandProfile } = require('../../lib/brand-context');
 const { buildStrategySpreadsheet } = require('../../lib/spreadsheet');
 const { buildGoogleSheetsReport } = require('../../lib/google-spreadsheet');
@@ -16,12 +15,6 @@ module.exports = async function handler(req, res) {
     payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
   } catch (err) {
     return res.status(400).json({ error: 'Invalid payload' });
-  }
-
-  // ── External Select: client search ──
-  if (payload.type === 'block_suggestion') {
-    const query = (payload.value || '').trim().toLowerCase();
-    return res.status(200).json(await buildClientSuggestions(query));
   }
 
   // ── Modal Submission ──
@@ -40,104 +33,6 @@ module.exports = async function handler(req, res) {
   return res.status(200).json({ ok: true });
 };
 
-// ─── Client Search Suggestions ───
-
-// Client Info Docs folder ID in ClickUp "Client Delivery" space
-const CLIENT_INFO_DOCS_FOLDER_ID = '901812024928';
-
-async function buildClientSuggestions(query) {
-  const options = [];
-  const seen = new Set();
-
-  // Primary source: ClickUp Client Info Docs folder via v3 docs API
-  try {
-    const cuToken = process.env.CLICKUP_API_TOKEN;
-    const wsId = process.env.CLICKUP_WORKSPACE_ID;
-    if (cuToken && wsId) {
-      const cuResp = await fetch(`https://api.clickup.com/api/v3/workspaces/${wsId}/docs`, {
-        headers: { 'Authorization': cuToken },
-      });
-      if (cuResp.ok) {
-        const data = await cuResp.json();
-        const clientDocs = (data.docs || []).filter(doc =>
-          doc.parent?.id === CLIENT_INFO_DOCS_FOLDER_ID &&
-          !doc.deleted &&
-          doc.name &&
-          !doc.name.toLowerCase().includes('template') &&
-          !doc.name.toLowerCase().includes('definitions') &&
-          doc.name !== 'AD6SC3RT6'
-        );
-
-        for (const doc of clientDocs) {
-          const name = doc.name
-            .replace(/\s*(client\s+)?info(\s+doc)?(\s+template)?$/i, '')
-            .trim();
-          if (!name) continue;
-
-          const val = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
-          const nameLower = name.toLowerCase();
-
-          if (seen.has(nameLower)) continue;
-          if (query && !nameLower.includes(query)) continue;
-
-          seen.add(nameLower);
-          options.push({
-            text: { type: 'plain_text', text: name },
-            value: val,
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.error('ClickUp docs error:', err.message);
-  }
-
-  // Secondary source: Brand Guardian cache (supplements ClickUp)
-  const pat = process.env.GITHUB_PAT;
-  if (pat) {
-    try {
-      const resp = await fetch('https://api.github.com/repos/jeffperoutka/brand-guardian/contents/brand-cache', {
-        headers: { 'Authorization': `Bearer ${pat}`, 'Accept': 'application/vnd.github.v3+json' },
-      });
-      if (resp.ok) {
-        const files = await resp.json();
-        for (const f of files) {
-          if (!f.name.endsWith('.json')) continue;
-          const brand = f.name.replace('.json', '').replace(/-/g, ' ');
-          const brandLower = brand.toLowerCase();
-          if (seen.has(brandLower)) continue;
-          if (query && !brandLower.includes(query)) continue;
-
-          seen.add(brandLower);
-          options.push({
-            text: { type: 'plain_text', text: titleCase(brand) },
-            value: brand.toLowerCase().replace(/\s/g, '-'),
-          });
-        }
-      }
-    } catch (err) {
-      console.error('Brand cache search error:', err.message);
-    }
-  }
-
-  // Allow adding new clients
-  if (query && !options.some(o => o.value === query.replace(/\s/g, '-'))) {
-    options.push({
-      text: { type: 'plain_text', text: `+ New client: ${titleCase(query)}` },
-      value: `__new__:${query}`,
-    });
-  }
-
-  if (options.length === 0) {
-    options.push({
-      text: { type: 'plain_text', text: 'Type a client name...' },
-      value: '__empty__',
-    });
-  }
-
-  return { options: options.slice(0, 100) };
-}
-
 // ─── Strategy Run Handler ───
 
 async function handleStrategyRun(payload) {
@@ -147,19 +42,8 @@ async function handleStrategyRun(payload) {
   try { metadata = JSON.parse(payload.view?.private_metadata || '{}'); } catch (e) {}
 
   // Parse form values
-  const selectedOption = values?.client_block?.client_select?.selected_option;
-  let clientName = '';
-  if (selectedOption) {
-    const val = selectedOption.value;
-    if (val.startsWith('__new__:')) {
-      clientName = val.slice(8).replace(/-/g, ' ');
-    } else if (val === '__empty__') {
-      clientName = '';
-    } else {
-      clientName = val.replace(/-/g, ' ');
-    }
-  }
-
+  const clientName = (values?.client_block?.client_name_input?.value || '').trim();
+  const clientDocUrl = values?.client_doc_block?.client_doc_input?.value || '';
   const websiteUrl = values?.client_url_block?.client_url_input?.value || '';
   const packageTier = values?.package_block?.package_select?.selected_option?.value || 'b';
   const customKeywords = values?.keywords_block?.keywords_input?.value || '';
@@ -240,12 +124,14 @@ async function handleStrategyRun(payload) {
 
     // Get brand profile
     await updateProgress('Loading brand profile...');
-    const brandProfile = await getBrandProfile(clientName, websiteUrl, updateProgress);
+    const brandProfile = await getBrandProfile(clientName, clientDocUrl, websiteUrl, updateProgress);
 
     if (!brandProfile) {
-      const hint = websiteUrl
-        ? 'Website research also failed. Check the URL and try again.'
-        : 'Provide a website URL in the form so George can build a profile from the site.';
+      const hint = clientDocUrl
+        ? 'Could not read the Google Doc. Check the sharing permissions (must be accessible to the service account).'
+        : websiteUrl
+          ? 'Website research also failed. Check the URL and try again.'
+          : 'Provide a Client Info Doc (Google Docs link) or a website URL so George can build a profile.';
       await slack.updateMessage(channel, progressTs,
         `Could not load brand profile for "${titleCase(clientName)}". ${hint}`
       );

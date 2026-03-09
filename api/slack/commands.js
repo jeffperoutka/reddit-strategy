@@ -1,7 +1,5 @@
 const { waitUntil } = require('@vercel/functions');
 const slack = require('../../lib/connectors/slack');
-const { readBrandGuardianCache } = require('../../lib/connectors/github');
-const { getPackageOptions } = require('../../lib/packages');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -21,29 +19,42 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
   try {
     const blocks = [];
 
-    // ── Client selection — searchable external select ──
+    // ── Client Name ──
     blocks.push({
       type: 'input',
       block_id: 'client_block',
-      label: { type: 'plain_text', text: 'Client' },
+      label: { type: 'plain_text', text: 'Client Name' },
       element: {
-        type: 'external_select',
-        action_id: 'client_select',
-        placeholder: { type: 'plain_text', text: 'Search for a client...' },
-        min_query_length: 0,
+        type: 'plain_text_input',
+        action_id: 'client_name_input',
+        placeholder: { type: 'plain_text', text: 'Enter the client name' },
       },
     });
 
-    // ── Client Website URL (optional — for new clients) ──
+    // ── Client Info Doc (Google Docs link) ──
+    blocks.push({
+      type: 'input',
+      block_id: 'client_doc_block',
+      label: { type: 'plain_text', text: 'Client Info Doc (Google Docs)' },
+      hint: { type: 'plain_text', text: 'Paste the Google Docs link to the client info document. George will read it to build the brand profile.' },
+      optional: true,
+      element: {
+        type: 'url_text_input',
+        action_id: 'client_doc_input',
+        placeholder: { type: 'plain_text', text: 'https://docs.google.com/document/d/...' },
+      },
+    });
+
+    // ── Client Website URL (optional — for new clients without info doc) ──
     blocks.push({
       type: 'input',
       block_id: 'client_url_block',
-      label: { type: 'plain_text', text: 'Client Website URL' },
+      label: { type: 'plain_text', text: 'Client Website URL (optional)' },
       optional: true,
       element: {
         type: 'url_text_input',
         action_id: 'client_url_input',
-        placeholder: { type: 'plain_text', text: 'https://www.example.com (required if new client)' },
+        placeholder: { type: 'plain_text', text: 'https://www.example.com (fallback if no info doc)' },
       },
     });
 
