@@ -72,6 +72,38 @@ module.exports = async (req, res) => {
         errors: createErr.errors,
       });
     }
+
+    // Step 5: List ALL files in service account Drive (for debugging storage)
+    try {
+      const allFiles = await drive.files.list({
+        pageSize: 100,
+        fields: 'files(id,name,mimeType,size,createdTime)',
+        orderBy: 'createdTime desc',
+      });
+      results.steps.push({
+        step: 'list_all_files',
+        ok: true,
+        files: (allFiles.data.files || []).map(f => ({
+          id: f.id, name: f.name, size: f.size, created: f.createdTime,
+        })),
+      });
+    } catch (listErr) {
+      results.steps.push({ step: 'list_all_files', ok: false, error: listErr.message });
+    }
+
+    // Step 6: If ?cleanup=1, delete all files to free storage
+    if (req.query.cleanup === '1') {
+      try {
+        const allFiles = await drive.files.list({ pageSize: 100, fields: 'files(id,name)' });
+        let deleted = 0;
+        for (const f of (allFiles.data.files || [])) {
+          try { await drive.files.delete({ fileId: f.id }); deleted++; } catch (e) {}
+        }
+        results.steps.push({ step: 'cleanup_all', ok: true, deleted });
+      } catch (cleanErr) {
+        results.steps.push({ step: 'cleanup_all', ok: false, error: cleanErr.message });
+      }
+    }
   } catch (err) {
     results.steps.push({
       step: 'failed_early',
