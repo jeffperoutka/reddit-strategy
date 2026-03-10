@@ -122,7 +122,11 @@ async function executePhase3(params) {
         formData
       );
     } catch (sheetErr) {
-      console.error('Google Sheets generation failed:', sheetErr.message, sheetErr.stack);
+      const errDetail = `${sheetErr.message} | code=${sheetErr.code || 'none'} | status=${sheetErr.status || 'none'}`;
+      console.error('Google Sheets generation failed:', errDetail, sheetErr.stack);
+
+      // Post the actual error to Slack thread so we can debug
+      await threadPost(`Google Sheets error: ${errDetail}`);
 
       // Fallback: XLSX upload
       try {
@@ -131,7 +135,7 @@ async function executePhase3(params) {
         await slack.uploadFile(xlsxBuffer, filename, channel, {
           threadTs, initialComment: 'Google Sheets failed — here is the XLSX fallback.',
         });
-        await updateProgress('Done (XLSX fallback — Google Sheets auth issue).');
+        await updateProgress('Done (XLSX fallback).');
         return;
       } catch (fallbackErr) {
         console.error('XLSX fallback also failed:', fallbackErr.message);
