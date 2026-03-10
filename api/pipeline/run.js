@@ -1,37 +1,34 @@
 /**
- * Pipeline Runner — Dedicated endpoint for long-running strategy pipeline.
+ * Pipeline Runner — Phase 1: Research & Analysis
  *
- * This endpoint gets its own Vercel function invocation with a full 300s
- * maxDuration budget, separate from the Slack interact handler.
+ * Handles: brand profile → keywords → DataForSEO → thread analysis
+ * Then triggers Phase 2 (/api/pipeline/generate) with intermediate data.
  *
- * Called by /api/slack/interact via HTTP fire-and-forget.
+ * Each phase gets its own Vercel function with 300s maxDuration = 600s total.
  */
 const { waitUntil } = require('@vercel/functions');
 const slack = require('../../lib/connectors/slack');
-const { runStrategyPipeline } = require('../../lib/engine');
+const { extractKeywords, discoverThreads, checkAICitations, analyzeThreads } = require('../../lib/engine');
 const { getPackage } = require('../../lib/packages');
 const { getBrandProfile } = require('../../lib/brand-context');
-const { buildStrategySpreadsheet } = require('../../lib/spreadsheet');
-const { buildGoogleSheetsReport } = require('../../lib/google-spreadsheet');
+
+const PIPELINE_SECRET = process.env.PIPELINE_SECRET || 'george-internal-pipeline-2024';
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  // Validate internal secret
   const secret = req.headers['x-pipeline-secret'];
-  if (secret !== (process.env.PIPELINE_SECRET || 'george-internal-pipeline-2024')) {
+  if (secret !== PIPELINE_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  // Respond immediately — the pipeline runs in waitUntil with full 300s budget
   res.status(202).json({ status: 'accepted' });
 
-  waitUntil(executePipeline(req.body).catch(err => {
-    console.error('FATAL: Pipeline crashed:', err.message, err.stack);
-    // Try to notify via Slack
+  waitUntil(executePhase1(req, req.body).catch(err => {
+    console.error('FATAL: Phase 1 crashed:', err.message, err.stack);
     const { channel, threadTs, userId } = req.body || {};
     if (channel && threadTs) {
-      slack.postMessage(channel, `Pipeline crashed: ${err.message}`, { threadTs }).catch(() => {});
+      slack.postMessage(channel, `Pipeline crashed (phase 1): ${err.message}`, { threadTs }).catch(() => {});
     } else if (userId) {
       slack.openDM(userId).then(ch =>
         slack.postMessage(ch, `Strategy run crashed: ${err.message}`)
@@ -40,7 +37,7 @@ module.exports = async function handler(req, res) {
   }));
 };
 
-async function executePipeline(params) {
+async function executePhase1(req, params) {
   const {
     clientName, clientDocUrl, packageTier,
     customKeywords, campaignMonth, prevSpreadsheetUrl,
@@ -53,7 +50,7 @@ async function executePipeline(params) {
 
   const updateProgress = async (stepText) => {
     try {
-      console.log(`[Pipeline ${elapsed()}s] ${stepText}`);
+      console.log(`[Phase1 ${elapsed()}s] ${stepText}`);
       if (channel && progressTs) {
         await slack.updateMessage(channel, progressTs, stepText);
       }
@@ -69,7 +66,9 @@ async function executePipeline(params) {
   };
 
   try {
-    // Get brand profile
+    // ── Phase 1: Research & Analysis ──
+
+    // Step 1: Brand profile
     await updateProgress('Loading brand profile...');
     const brandProfile = await getBrandProfile(clientName, clientDocUrl, null, updateProgress);
 
@@ -78,91 +77,74 @@ async function executePipeline(params) {
       await updateProgress(`Could not load brand profile for "${titleCase(clientName)}". ${hint}`);
       return;
     }
+    await updateProgress('Brand profile loaded.');
 
-    await updateProgress('Brand profile loaded. Running strategy pipeline...');
+    // Step 2: Keywords
+    await updateProgress('Extracting target keywords...');
+    const keywords = await extractKeywords(brandProfile, packageTier, customKeywords);
+    await updateProgress(`Found ${keywords.length} keywords: ${keywords.join(', ')}`);
 
-    // Run the full strategy pipeline
-    const strategyData = await runStrategyPipeline(
-      brandProfile,
-      packageTier,
-      customKeywords,
-      updateProgress
-    );
+    // Step 3: Discover threads
+    await updateProgress(`Searching Google for Reddit threads across ${keywords.length} keywords...`);
+    const threads = await discoverThreads(keywords, packageTier);
+    await updateProgress(`Discovered ${threads.length} Reddit threads`);
 
-    console.log(`[Pipeline ${elapsed()}s] Pipeline complete, building Google Sheet...`);
-    await updateProgress('Pipeline complete. Building Google Sheet...');
-
-    // Build Google Sheets report
-    const formData = {
-      month: campaignMonth,
-      prevSpreadsheetUrl,
-      packageName: pkg?.name || packageTier,
-      clientDocUrl,
-    };
-
-    let sheetsUrl;
-    try {
-      sheetsUrl = await buildGoogleSheetsReport(
-        strategyData,
-        brandProfile,
-        packageTier,
-        formData
-      );
-    } catch (sheetErr) {
-      console.error('Google Sheets generation failed:', sheetErr.message, sheetErr.stack);
-
-      // Fallback: XLSX upload
-      try {
-        const xlsxBuffer = await buildStrategySpreadsheet(strategyData, brandProfile, packageTier, formData);
-        const filename = `Reddit_Strategy_${titleCase(clientName).replace(/\s+/g, '_')}_Month${campaignMonth}.xlsx`;
-        await slack.uploadFile(xlsxBuffer, filename, channel, {
-          threadTs, initialComment: 'Google Sheets failed — here is the XLSX fallback.',
-        });
-        await updateProgress('Done (XLSX fallback — Google Sheets auth issue).');
-        return;
-      } catch (fallbackErr) {
-        console.error('XLSX fallback also failed:', fallbackErr.message);
-        await updateProgress(`Report generation failed: ${sheetErr.message}`);
-        return;
-      }
+    // Step 4: AI citations (Package B & C only)
+    let aiCitations = [];
+    if (pkg?.features?.aiCitationCheck) {
+      await updateProgress('Checking AI citation data...');
+      aiCitations = await checkAICitations(keywords);
     }
 
-    // Post final summary
-    const commentCount = strategyData.commentsWithAlignment?.length || 0;
-    const postCount = strategyData.posts?.length || 0;
-    const threadCount = strategyData.threads?.length || 0;
-    const upvoteCount = strategyData.upvotePlan?.totalUpvotes || 0;
+    // Step 5: Analyze threads
+    let threadAnalysis = { analyzedThreads: [], subredditMap: {}, topThemes: [], competitorPresence: '' };
+    if (threads.length > 0) {
+      await updateProgress(`Analyzing ${threads.length} threads for opportunities...`);
+      threadAnalysis = await analyzeThreads(threads, brandProfile, packageTier);
+      const highValue = (threadAnalysis.analyzedThreads || []).filter(t => t.category === 'high_value').length;
+      await updateProgress(`Analysis complete: ${highValue} high-value threads. Handing off to generation phase...`);
+    } else {
+      await updateProgress('No Reddit threads found for these keywords.');
+    }
 
-    const deliverables = [
-      `${threadCount} threads`,
-      `${commentCount} comments`,
-      postCount > 0 ? `${postCount} posts` : null,
-      upvoteCount > 0 ? `${upvoteCount} upvotes` : null,
-    ].filter(Boolean).join(', ');
+    console.log(`[Phase1 ${elapsed()}s] Phase 1 complete. Triggering Phase 2...`);
 
-    const isAppend = prevSpreadsheetUrl && parseInt(campaignMonth) > 1;
-    const appendNote = isAppend
-      ? `Month ${campaignMonth} tabs appended to existing sheet.`
-      : 'New spreadsheet created with editing access.';
+    // ── Trigger Phase 2: Generation + Report ──
+    const host = req.headers.host || req.headers['x-forwarded-host'];
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const phase2Url = `${protocol}://${host}/api/pipeline/generate`;
 
-    console.log(`[Pipeline ${elapsed()}s] COMPLETE — all done`);
-    await updateProgress('Done.');
+    const phase2Resp = await fetch(phase2Url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-pipeline-secret': PIPELINE_SECRET,
+      },
+      body: JSON.stringify({
+        // Intermediate data from Phase 1
+        brandProfile,
+        keywords,
+        threads,
+        threadAnalysis,
+        aiCitations,
+        // Pass-through params
+        packageTier,
+        campaignMonth,
+        prevSpreadsheetUrl,
+        clientDocUrl,
+        channel,
+        threadTs,
+        progressTs,
+        userId,
+      }),
+    });
 
-    await threadPost([
-      `*${titleCase(clientName)} — Reddit Strategy (${pkg?.name || packageTier}, Month ${campaignMonth})*`,
-      ``,
-      `${deliverables}`,
-      `${appendNote}`,
-      ``,
-      `${sheetsUrl}`,
-      ``,
-      `_Review and make changes directly in the sheet. Highlight anything to discuss._`,
-    ].join('\n'));
+    console.log(`[Phase1 ${elapsed()}s] Phase 2 trigger response: ${phase2Resp.status}`);
 
   } catch (err) {
-    console.error(`[Pipeline ${elapsed()}s] Pipeline error:`, err.message, err.stack);
+    console.error(`[Phase1 ${elapsed()}s] Error:`, err.message, err.stack);
     try {
-      await threadPost(`Strategy run failed: ${err.message}`);
+      await threadPost(`Strategy run failed (research phase): ${err.message}`);
     } catch (e) {
       console.error('Failed to post error:', e.message);
     }
