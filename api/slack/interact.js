@@ -1,10 +1,6 @@
 const { waitUntil } = require('@vercel/functions');
 const slack = require('../../lib/connectors/slack');
-const { runStrategyPipeline } = require('../../lib/engine');
 const { getPackage } = require('../../lib/packages');
-const { getBrandProfile } = require('../../lib/brand-context');
-const { buildStrategySpreadsheet } = require('../../lib/spreadsheet');
-const { buildGoogleSheetsReport } = require('../../lib/google-spreadsheet');
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -23,16 +19,7 @@ module.exports = async function handler(req, res) {
 
     if (callbackId === 'reddit_strategy_submit') {
       res.status(200).json({ response_action: 'clear' });
-      waitUntil(handleStrategyRun(payload).catch(err => {
-        console.error('FATAL: handleStrategyRun crashed:', err.message, err.stack);
-        // Attempt to notify user via DM
-        const userId = payload.user?.id;
-        if (userId) {
-          slack.openDM(userId).then(ch =>
-            slack.postMessage(ch, `Strategy run crashed unexpectedly: ${err.message}\nThis may be a timeout issue. Check Vercel logs.`)
-          ).catch(() => {});
-        }
-      }));
+      waitUntil(setupAndTriggerPipeline(req, payload));
       return;
     }
 
@@ -42,9 +29,9 @@ module.exports = async function handler(req, res) {
   return res.status(200).json({ ok: true });
 };
 
-// ─── Strategy Run Handler ───
+// ─── Setup Slack thread, then trigger pipeline endpoint ───
 
-async function handleStrategyRun(payload) {
+async function setupAndTriggerPipeline(req, payload) {
   const values = payload.view?.state?.values;
   const userId = payload.user?.id;
   let metadata = {};
@@ -56,8 +43,6 @@ async function handleStrategyRun(payload) {
   const websiteUrl = values?.client_url_block?.client_url_input?.value || '';
   const packageTier = values?.package_block?.package_select?.selected_option?.value || 'b';
   const customKeywords = values?.keywords_block?.keywords_input?.value || '';
-  const targetSubreddits = values?.subreddits_block?.subreddits_input?.value || '';
-  const notes = values?.notes_block?.notes_input?.value || '';
   const campaignMonth = values?.month_block?.month_select?.selected_option?.value || '1';
   const prevSpreadsheetUrl = values?.prev_spreadsheet_block?.prev_spreadsheet_input?.value || '';
 
@@ -68,7 +53,7 @@ async function handleStrategyRun(payload) {
 
   const pkg = getPackage(packageTier);
 
-  // ── Resolve channel — prefer #reddit-bot, fallback chain ──
+  // ── Resolve channel ──
   let channel = metadata.channel_id || process.env.SLACK_CHANNEL_ID;
   let parentMsg;
 
@@ -116,128 +101,51 @@ async function handleStrategyRun(payload) {
   }
 
   const threadTs = parentMsg.ts;
-  const threadPost = async (text) => slack.postMessage(channel, text, { threadTs });
 
-  const runStart = Date.now();
-  const elapsed = () => ((Date.now() - runStart) / 1000).toFixed(1);
+  // Post progress message
+  const progressMsg = await slack.postMessage(channel, 'George is working on this...', { threadTs });
+  const progressTs = progressMsg.ts;
+
+  // ── Fire off the pipeline as a separate Vercel function ──
+  // This gives the pipeline its own independent 300s maxDuration budget.
+  const host = req.headers.host || req.headers['x-forwarded-host'];
+  const protocol = host?.includes('localhost') ? 'http' : 'https';
+  const pipelineUrl = `${protocol}://${host}/api/pipeline/run`;
+
+  console.log(`Triggering pipeline at ${pipelineUrl}`);
 
   try {
-    // Progress message (updated in-place)
-    const progressMsg = await threadPost('George is working on this...');
-    const progressTs = progressMsg.ts;
-
-    const updateProgress = async (stepText) => {
-      try {
-        await slack.updateMessage(channel, progressTs, stepText);
-      } catch (err) {
-        console.error('Progress update failed:', err.message);
-      }
-    };
-
-    // Get brand profile
-    await updateProgress('Loading brand profile...');
-    const brandProfile = await getBrandProfile(clientName, clientDocUrl, websiteUrl, updateProgress);
-
-    if (!brandProfile) {
-      const hint = clientDocUrl
-        ? 'Could not read the Google Doc. Check the sharing permissions (must be accessible to the service account).'
-        : websiteUrl
-          ? 'Website research also failed. Check the URL and try again.'
-          : 'Provide a Client Info Doc (Google Docs link) or a website URL so George can build a profile.';
-      await slack.updateMessage(channel, progressTs,
-        `Could not load brand profile for "${titleCase(clientName)}". ${hint}`
-      );
-      return;
-    }
-
-    await updateProgress(`Brand profile loaded. Running strategy pipeline...`);
-
-    // Run the full strategy pipeline
-    const strategyData = await runStrategyPipeline(
-      brandProfile,
-      packageTier,
-      customKeywords,
-      updateProgress
-    );
-
-    console.log(`[Run ${elapsed()}s] Pipeline complete, building Google Sheet...`);
-    await updateProgress('Pipeline complete. Building Google Sheet...');
-
-    // ── Build Google Sheets report ──
-    const isAppend = prevSpreadsheetUrl && parseInt(campaignMonth) > 1;
-    const formData = {
-      month: campaignMonth,
-      prevSpreadsheetUrl,
-      packageName: pkg?.name || packageTier,
-      clientDocUrl,
-    };
-
-    let sheetsUrl;
-    try {
-      sheetsUrl = await buildGoogleSheetsReport(
-        strategyData,
-        brandProfile,
+    const resp = await fetch(pipelineUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-pipeline-secret': process.env.PIPELINE_SECRET || 'george-internal-pipeline-2024',
+      },
+      body: JSON.stringify({
+        clientName,
+        clientDocUrl,
+        websiteUrl,
         packageTier,
-        formData
-      );
-    } catch (sheetErr) {
-      console.error('Google Sheets generation failed:', sheetErr.message, sheetErr.stack);
+        customKeywords,
+        campaignMonth,
+        prevSpreadsheetUrl,
+        channel,
+        threadTs,
+        progressTs,
+        userId,
+      }),
+    });
 
-      // Fallback: generate XLSX and upload
-      try {
-        const xlsxBuffer = await buildStrategySpreadsheet(strategyData, brandProfile, packageTier, formData);
-        const filename = `Reddit_Strategy_${titleCase(clientName).replace(/\s+/g, '_')}_Month${campaignMonth}.xlsx`;
-        await slack.uploadFile(xlsxBuffer, filename, channel, {
-          threadTs, initialComment: 'Google Sheets failed — here is the XLSX fallback.',
-        });
-        await slack.updateMessage(channel, progressTs, 'Done (XLSX fallback — Google Sheets auth issue).');
-        return;
-      } catch (fallbackErr) {
-        console.error('XLSX fallback also failed:', fallbackErr.message);
-        await slack.updateMessage(channel, progressTs, `Report generation failed: ${sheetErr.message}`);
-        return;
-      }
-    }
-
-    // ── Post final summary with Google Sheet link ──
-    const commentCount = strategyData.commentsWithAlignment?.length || 0;
-    const postCount = strategyData.posts?.length || 0;
-    const threadCount = strategyData.threads?.length || 0;
-    const upvoteCount = strategyData.upvotePlan?.totalUpvotes || 0;
-
-    const deliverables = [
-      `${threadCount} threads`,
-      `${commentCount} comments`,
-      postCount > 0 ? `${postCount} posts` : null,
-      upvoteCount > 0 ? `${upvoteCount} upvotes` : null,
-    ].filter(Boolean).join(', ');
-
-    const appendNote = isAppend
-      ? `Month ${campaignMonth} tabs appended to existing sheet.`
-      : 'New spreadsheet created with editing access.';
-
-    // Update progress to done
-    console.log(`[Run ${elapsed()}s] COMPLETE — all done`);
-    await slack.updateMessage(channel, progressTs, 'Done.');
-
-    // Post the deliverable
-    await threadPost([
-      `*${titleCase(clientName)} — Reddit Strategy (${pkg?.name || packageTier}, Month ${campaignMonth})*`,
-      ``,
-      `${deliverables}`,
-      `${appendNote}`,
-      ``,
-      `${sheetsUrl}`,
-      ``,
-      `_Review and make changes directly in the sheet. Highlight anything to discuss._`,
-    ].join('\n'));
-
+    console.log(`Pipeline trigger response: ${resp.status}`);
   } catch (err) {
-    console.error('handleStrategyRun error:', err.message, err.stack);
+    console.error('Pipeline trigger failed:', err.message);
+    // Notify user
     try {
-      await threadPost(`Strategy run failed: ${err.message}`);
+      await slack.updateMessage(channel, progressTs,
+        `Failed to start pipeline: ${err.message}. Please try again.`
+      );
     } catch (e) {
-      console.error('Failed to post error:', e.message);
+      console.error('Failed to notify user:', e.message);
     }
   }
 }
