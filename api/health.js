@@ -26,21 +26,43 @@ module.exports = async (req, res) => {
       impersonate_email: process.env.GOOGLE_IMPERSONATE_EMAIL || 'not set',
     });
 
-    // Step 2: Create Drive client
-    const auth = new google.auth.GoogleAuth({
-      credentials: creds,
-      scopes: ['https://www.googleapis.com/auth/drive'],
-    });
-    const drive = google.drive({ version: 'v3', auth });
-    results.steps.push({ step: 'create_drive_client', ok: true });
+    // Step 2: Create Drive client (with impersonation if configured)
+    const impersonateEmail = process.env.GOOGLE_IMPERSONATE_EMAIL;
+    let drive;
+    if (impersonateEmail) {
+      const jwtAuth = new google.auth.JWT({
+        email: creds.client_email,
+        key: creds.private_key,
+        scopes: ['https://www.googleapis.com/auth/drive'],
+        subject: impersonateEmail,
+      });
+      drive = google.drive({ version: 'v3', auth: jwtAuth });
+      results.steps.push({ step: 'create_drive_client', ok: true, mode: 'impersonation', subject: impersonateEmail });
+    } else {
+      const auth = new google.auth.GoogleAuth({
+        credentials: creds,
+        scopes: ['https://www.googleapis.com/auth/drive'],
+      });
+      drive = google.drive({ version: 'v3', auth });
+      results.steps.push({ step: 'create_drive_client', ok: true, mode: 'direct_service_account' });
+    }
 
     // Step 3: List files (tests auth)
-    const listResp = await drive.files.list({ pageSize: 1, fields: 'files(id,name)' });
-    results.steps.push({
-      step: 'list_files',
-      ok: true,
-      file_count: listResp.data.files?.length || 0,
-    });
+    try {
+      const listResp = await drive.files.list({ pageSize: 1, fields: 'files(id,name)' });
+      results.steps.push({
+        step: 'list_files',
+        ok: true,
+        file_count: listResp.data.files?.length || 0,
+      });
+    } catch (listErr) {
+      results.steps.push({
+        step: 'list_files',
+        ok: false,
+        error: listErr.message,
+        code: listErr.code,
+      });
+    }
 
     // Step 4: Create a tiny test spreadsheet via CSV upload with auto-conversion
     try {
