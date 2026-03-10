@@ -1,17 +1,16 @@
 /**
- * Pipeline Runner — Phase 2: Generation & Report
+ * Pipeline Runner — Phase 2: Content Generation
  *
- * Handles: comments + posts → alignment → report → Google Sheets → Slack delivery
- * Called by Phase 1 (/api/pipeline/run) with intermediate research data.
+ * Handles: comments + posts generation (batched, in parallel)
+ * Called by Phase 1 (/api/pipeline/run) with research data.
+ * Triggers Phase 3 (/api/pipeline/finalize) with generated content.
  *
  * Gets its own 300s maxDuration budget.
  */
 const { waitUntil } = require('@vercel/functions');
 const slack = require('../../lib/connectors/slack');
-const { generateComments, checkBrandAlignment, buildStrategyReport, generatePosts, planUpvoteSupport } = require('../../lib/engine');
+const { generateComments, generatePosts } = require('../../lib/engine');
 const { getPackage } = require('../../lib/packages');
-const { buildStrategySpreadsheet } = require('../../lib/spreadsheet');
-const { buildGoogleSheetsReport } = require('../../lib/google-spreadsheet');
 
 const PIPELINE_SECRET = process.env.PIPELINE_SECRET || 'george-internal-pipeline-2024';
 
@@ -25,7 +24,7 @@ module.exports = async function handler(req, res) {
 
   res.status(202).json({ status: 'accepted' });
 
-  waitUntil(executePhase2(req.body).catch(err => {
+  waitUntil(executePhase2(req, req.body).catch(err => {
     console.error('FATAL: Phase 2 crashed:', err.message, err.stack);
     const { channel, threadTs, userId } = req.body || {};
     if (channel && threadTs) {
@@ -38,7 +37,7 @@ module.exports = async function handler(req, res) {
   }));
 };
 
-async function executePhase2(params) {
+async function executePhase2(req, params) {
   const {
     brandProfile, keywords, threads, threadAnalysis, aiCitations,
     packageTier, campaignMonth, prevSpreadsheetUrl, clientDocUrl,
@@ -48,7 +47,6 @@ async function executePhase2(params) {
   const runStart = Date.now();
   const elapsed = () => ((Date.now() - runStart) / 1000).toFixed(1);
   const pkg = getPackage(packageTier);
-  const clientName = brandProfile?.clientName || 'Client';
 
   const updateProgress = async (stepText) => {
     try {
@@ -68,9 +66,10 @@ async function executePhase2(params) {
   };
 
   try {
-    let data = { keywords, threads, threadAnalysis, aiCitations };
+    let comments = [];
+    let posts = [];
 
-    // ── Step 1: Generate comments + posts in parallel ──
+    // ── Generate comments + posts in parallel ──
     if (threadAnalysis?.analyzedThreads?.length > 0) {
       await updateProgress(`Generating ${pkg?.monthlyTargets?.comments || 0} comments + ${pkg?.monthlyTargets?.posts || 0} posts (batched)...`);
 
@@ -93,116 +92,48 @@ async function executePhase2(params) {
 
       const [commentResult, postResult] = await Promise.all([commentPromise, postPromise]);
 
-      data.comments = commentResult.comments || [];
-      data.posts = postResult.posts || [];
-      console.log(`[Phase2 ${elapsed()}s] Generated ${data.comments.length} comments + ${data.posts.length} posts`);
-      await updateProgress(`Generated ${data.comments.length} comments + ${data.posts.length} posts`);
-
-      // ── Step 2: Brand alignment check ──
-      if (data.comments.length > 0) {
-        await updateProgress('Running brand alignment check...');
-        data.commentsWithAlignment = await checkBrandAlignment(data.comments, brandProfile);
-        const aligned = data.commentsWithAlignment.filter(c => c.alignment?.aligned).length;
-        await updateProgress(`Brand alignment: ${aligned}/${data.commentsWithAlignment.length} comments aligned`);
-      } else {
-        data.commentsWithAlignment = [];
-      }
-    } else {
-      data.comments = [];
-      data.commentsWithAlignment = [];
-      data.posts = [];
+      comments = commentResult.comments || [];
+      posts = postResult.posts || [];
+      console.log(`[Phase2 ${elapsed()}s] Generated ${comments.length} comments + ${posts.length} posts`);
+      await updateProgress(`Generated ${comments.length} comments + ${posts.length} posts. Starting alignment & report...`);
     }
 
-    // ── Step 3: Upvote planning (sync, no API call) ──
-    if (pkg?.monthlyTargets?.upvotes > 0) {
-      try {
-        data.upvotePlan = planUpvoteSupport(
-          data.commentsWithAlignment || [],
-          data.posts || [],
-          packageTier
-        );
-      } catch (err) {
-        console.error('Upvote planning failed:', err.message);
-        data.upvotePlan = null;
-      }
-    }
+    // ── Trigger Phase 3: Finalize (alignment, report, Google Sheets) ──
+    console.log(`[Phase2 ${elapsed()}s] Phase 2 complete. Triggering Phase 3...`);
 
-    data.brandAlignmentReport = null;
-    data.bestPracticesReport = null;
+    const host = req.headers.host || req.headers['x-forwarded-host'];
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const phase3Url = `${protocol}://${host}/api/pipeline/finalize`;
 
-    // ── Step 4: Build strategy report ──
-    await updateProgress('Building strategy report...');
-    data.report = await buildStrategyReport(data, brandProfile, packageTier);
-    console.log(`[Phase2 ${elapsed()}s] Report built`);
-
-    // ── Step 5: Build Google Sheets ──
-    await updateProgress('Pipeline complete. Building Google Sheet...');
-
-    const formData = {
-      month: campaignMonth,
-      prevSpreadsheetUrl,
-      packageName: pkg?.name || packageTier,
-      clientDocUrl,
-    };
-
-    let sheetsUrl;
-    try {
-      sheetsUrl = await buildGoogleSheetsReport(
-        data,
+    const phase3Resp = await fetch(phase3Url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-pipeline-secret': PIPELINE_SECRET,
+      },
+      body: JSON.stringify({
+        // Research data from Phase 1
         brandProfile,
+        keywords,
+        threads,
+        threadAnalysis,
+        aiCitations,
+        // Generated content from Phase 2
+        comments,
+        posts,
+        // Pass-through params
         packageTier,
-        formData
-      );
-    } catch (sheetErr) {
-      console.error('Google Sheets generation failed:', sheetErr.message, sheetErr.stack);
+        campaignMonth,
+        prevSpreadsheetUrl,
+        clientDocUrl,
+        channel,
+        threadTs,
+        progressTs,
+        userId,
+      }),
+    });
 
-      // Fallback: XLSX upload
-      try {
-        const xlsxBuffer = await buildStrategySpreadsheet(data, brandProfile, packageTier, formData);
-        const filename = `Reddit_Strategy_${titleCase(clientName).replace(/\s+/g, '_')}_Month${campaignMonth}.xlsx`;
-        await slack.uploadFile(xlsxBuffer, filename, channel, {
-          threadTs, initialComment: 'Google Sheets failed — here is the XLSX fallback.',
-        });
-        await updateProgress('Done (XLSX fallback — Google Sheets auth issue).');
-        return;
-      } catch (fallbackErr) {
-        console.error('XLSX fallback also failed:', fallbackErr.message);
-        await updateProgress(`Report generation failed: ${sheetErr.message}`);
-        return;
-      }
-    }
-
-    // ── Step 6: Post final summary ──
-    const commentCount = data.commentsWithAlignment?.length || 0;
-    const postCount = data.posts?.length || 0;
-    const threadCount = data.threads?.length || 0;
-    const upvoteCount = data.upvotePlan?.totalUpvotes || 0;
-
-    const deliverables = [
-      `${threadCount} threads`,
-      `${commentCount} comments`,
-      postCount > 0 ? `${postCount} posts` : null,
-      upvoteCount > 0 ? `${upvoteCount} upvotes` : null,
-    ].filter(Boolean).join(', ');
-
-    const isAppend = prevSpreadsheetUrl && parseInt(campaignMonth) > 1;
-    const appendNote = isAppend
-      ? `Month ${campaignMonth} tabs appended to existing sheet.`
-      : 'New spreadsheet created with editing access.';
-
-    console.log(`[Phase2 ${elapsed()}s] COMPLETE — all done`);
-    await updateProgress('Done.');
-
-    await threadPost([
-      `*${titleCase(clientName)} — Reddit Strategy (${pkg?.name || packageTier}, Month ${campaignMonth})*`,
-      ``,
-      `${deliverables}`,
-      `${appendNote}`,
-      ``,
-      `${sheetsUrl}`,
-      ``,
-      `_Review and make changes directly in the sheet. Highlight anything to discuss._`,
-    ].join('\n'));
+    console.log(`[Phase2 ${elapsed()}s] Phase 3 trigger response: ${phase3Resp.status}`);
 
   } catch (err) {
     console.error(`[Phase2 ${elapsed()}s] Error:`, err.message, err.stack);
@@ -212,8 +143,4 @@ async function executePhase2(params) {
       console.error('Failed to post error:', e.message);
     }
   }
-}
-
-function titleCase(str) {
-  return (str || '').replace(/\b\w/g, c => c.toUpperCase());
 }
