@@ -118,6 +118,9 @@ async function handleStrategyRun(payload) {
   const threadTs = parentMsg.ts;
   const threadPost = async (text) => slack.postMessage(channel, text, { threadTs });
 
+  const runStart = Date.now();
+  const elapsed = () => ((Date.now() - runStart) / 1000).toFixed(1);
+
   try {
     // Progress message (updated in-place)
     const progressMsg = await threadPost('George is working on this...');
@@ -157,6 +160,7 @@ async function handleStrategyRun(payload) {
       updateProgress
     );
 
+    console.log(`[Run ${elapsed()}s] Pipeline complete, building Google Sheet...`);
     await updateProgress('Pipeline complete. Building Google Sheet...');
 
     // ── Build Google Sheets report ──
@@ -213,6 +217,7 @@ async function handleStrategyRun(payload) {
       : 'New spreadsheet created with editing access.';
 
     // Update progress to done
+    console.log(`[Run ${elapsed()}s] COMPLETE — all done`);
     await slack.updateMessage(channel, progressTs, 'Done.');
 
     // Post the deliverable
