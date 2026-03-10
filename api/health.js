@@ -73,33 +73,55 @@ module.exports = async (req, res) => {
       });
     }
 
-    // Step 5: List ALL files in service account Drive (for debugging storage)
+    // Step 5: List ALL files owned by service account (across all locations)
     try {
       const allFiles = await drive.files.list({
-        pageSize: 100,
-        fields: 'files(id,name,mimeType,size,createdTime)',
+        pageSize: 200,
+        q: "'me' in owners",
+        fields: 'files(id,name,mimeType,size,createdTime,trashed)',
         orderBy: 'createdTime desc',
+        spaces: 'drive',
+        includeItemsFromAllDrives: false,
       });
       results.steps.push({
-        step: 'list_all_files',
+        step: 'list_owned_files',
         ok: true,
+        count: (allFiles.data.files || []).length,
         files: (allFiles.data.files || []).map(f => ({
-          id: f.id, name: f.name, size: f.size, created: f.createdTime,
+          id: f.id, name: f.name, size: f.size, created: f.createdTime, trashed: f.trashed,
         })),
       });
     } catch (listErr) {
-      results.steps.push({ step: 'list_all_files', ok: false, error: listErr.message });
+      results.steps.push({ step: 'list_owned_files', ok: false, error: listErr.message });
     }
 
-    // Step 6: If ?cleanup=1, delete all files to free storage
+    // Step 5b: Check storage quota
+    try {
+      const about = await drive.about.get({ fields: 'storageQuota' });
+      results.steps.push({
+        step: 'storage_quota',
+        ok: true,
+        quota: about.data.storageQuota,
+      });
+    } catch (quotaErr) {
+      results.steps.push({ step: 'storage_quota', ok: false, error: quotaErr.message });
+    }
+
+    // Step 6: If ?cleanup=1, delete all owned files AND empty trash
     if (req.query.cleanup === '1') {
       try {
-        const allFiles = await drive.files.list({ pageSize: 100, fields: 'files(id,name)' });
+        const allFiles = await drive.files.list({
+          pageSize: 200,
+          q: "'me' in owners",
+          fields: 'files(id,name)',
+        });
         let deleted = 0;
         for (const f of (allFiles.data.files || [])) {
           try { await drive.files.delete({ fileId: f.id }); deleted++; } catch (e) {}
         }
-        results.steps.push({ step: 'cleanup_all', ok: true, deleted });
+        // Empty trash to actually free storage
+        try { await drive.files.emptyTrash(); } catch (e) {}
+        results.steps.push({ step: 'cleanup_all', ok: true, deleted, trashEmptied: true });
       } catch (cleanErr) {
         results.steps.push({ step: 'cleanup_all', ok: false, error: cleanErr.message });
       }
