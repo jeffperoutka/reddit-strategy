@@ -103,8 +103,8 @@ async function executePhase3(params) {
     data.report = await buildStrategyReport(data, brandProfile, packageTier);
     console.log(`[Phase3 ${elapsed()}s] Report built`);
 
-    // ── Step 4: Build Google Sheets ──
-    await updateProgress('Building Google Sheet...');
+    // ── Step 4: Build spreadsheet & upload ──
+    await updateProgress('Building spreadsheet...');
 
     const formData = {
       month: campaignMonth,
@@ -113,35 +113,35 @@ async function executePhase3(params) {
       clientDocUrl,
     };
 
-    let sheetsUrl;
+    let driveUrl = null;
+    let xlsxBuffer = null;
+
+    // Try Google Drive upload (requires GOOGLE_IMPERSONATE_EMAIL for domain-wide delegation)
     try {
-      sheetsUrl = await buildGoogleSheetsReport(
-        data,
-        brandProfile,
-        packageTier,
-        formData
-      );
-    } catch (sheetErr) {
-      const errDetail = `${sheetErr.message} | code=${sheetErr.code || 'none'} | status=${sheetErr.status || 'none'}`;
-      console.error('Google Sheets generation failed:', errDetail, sheetErr.stack);
-
-      // Post the actual error to Slack thread so we can debug
-      await threadPost(`Google Sheets error: ${errDetail}`);
-
-      // Fallback: XLSX upload
+      const result = await buildGoogleSheetsReport(data, brandProfile, packageTier, formData);
+      xlsxBuffer = result.xlsxBuffer;
+      driveUrl = result.driveUrl;
+      if (driveUrl) {
+        console.log(`[Phase3 ${elapsed()}s] Google Sheet created: ${driveUrl}`);
+      }
+    } catch (driveErr) {
+      console.error(`[Phase3 ${elapsed()}s] Drive upload failed: ${driveErr.message}`);
+      // Build XLSX directly as fallback
       try {
-        const xlsxBuffer = await buildStrategySpreadsheet(data, brandProfile, packageTier, formData);
-        const filename = `Reddit_Strategy_${titleCase(clientName).replace(/\s+/g, '_')}_Month${campaignMonth}.xlsx`;
-        await slack.uploadFile(xlsxBuffer, filename, channel, {
-          threadTs, initialComment: 'Google Sheets failed — here is the XLSX fallback.',
-        });
-        await updateProgress('Done (XLSX fallback).');
-        return;
-      } catch (fallbackErr) {
-        console.error('XLSX fallback also failed:', fallbackErr.message);
-        await updateProgress(`Report generation failed: ${sheetErr.message}`);
+        xlsxBuffer = await buildStrategySpreadsheet(data, brandProfile, packageTier, formData);
+      } catch (xlsxErr) {
+        console.error('XLSX build failed:', xlsxErr.message);
+        await threadPost(`Spreadsheet generation failed: ${xlsxErr.message}`);
         return;
       }
+    }
+
+    // Always upload XLSX to Slack as reliable delivery
+    const filename = `Reddit_Strategy_${titleCase(clientName).replace(/\s+/g, '_')}_Month${campaignMonth}.xlsx`;
+    try {
+      await slack.uploadFile(xlsxBuffer, filename, channel, { threadTs });
+    } catch (uploadErr) {
+      console.error('Slack file upload failed:', uploadErr.message);
     }
 
     // ── Step 5: Post final summary ──
@@ -157,24 +157,23 @@ async function executePhase3(params) {
       upvoteCount > 0 ? `${upvoteCount} upvotes` : null,
     ].filter(Boolean).join(', ');
 
-    const isAppend = prevSpreadsheetUrl && parseInt(campaignMonth) > 1;
-    const appendNote = isAppend
-      ? `Month ${campaignMonth} tabs appended to existing sheet.`
-      : 'New spreadsheet created with editing access.';
-
     console.log(`[Phase3 ${elapsed()}s] COMPLETE — all done`);
     await updateProgress('Done.');
 
-    await threadPost([
+    const summaryLines = [
       `*${titleCase(clientName)} — Reddit Strategy (${pkg?.name || packageTier}, Month ${campaignMonth})*`,
       ``,
       `${deliverables}`,
-      `${appendNote}`,
-      ``,
-      `${sheetsUrl}`,
-      ``,
-      `_Review and make changes directly in the sheet. Highlight anything to discuss._`,
-    ].join('\n'));
+    ];
+
+    if (driveUrl) {
+      summaryLines.push(``, `Google Sheet: ${driveUrl}`, ``);
+      summaryLines.push(`_Review and make changes directly in the sheet. Highlight anything to discuss._`);
+    } else {
+      summaryLines.push(``, `_XLSX attached above. Open in Google Sheets or Excel to review._`);
+    }
+
+    await threadPost(summaryLines.join('\n'));
 
   } catch (err) {
     console.error(`[Phase3 ${elapsed()}s] Error:`, err.message, err.stack);
