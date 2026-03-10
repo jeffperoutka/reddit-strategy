@@ -19,8 +19,11 @@ module.exports = async (req, res) => {
       step: 'parse_key',
       ok: true,
       client_email: creds.client_email,
+      client_id: creds.client_id || 'not in key file',
       has_private_key: !!creds.private_key,
       private_key_length: creds.private_key?.length || 0,
+      has_impersonate: !!process.env.GOOGLE_IMPERSONATE_EMAIL,
+      impersonate_email: process.env.GOOGLE_IMPERSONATE_EMAIL || 'not set',
     });
 
     // Step 2: Create Drive client
