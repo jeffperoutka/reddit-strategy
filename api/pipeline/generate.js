@@ -72,7 +72,7 @@ async function executePhase2(params) {
 
     // ── Step 1: Generate comments + posts in parallel ──
     if (threadAnalysis?.analyzedThreads?.length > 0) {
-      await updateProgress('Generating comment drafts and post ideas...');
+      await updateProgress(`Generating ${pkg?.monthlyTargets?.comments || 0} comments + ${pkg?.monthlyTargets?.posts || 0} posts (batched)...`);
 
       const commentPromise = generateComments(
         threadAnalysis.analyzedThreads,
