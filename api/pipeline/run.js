@@ -42,7 +42,7 @@ module.exports = async function handler(req, res) {
 
 async function executePipeline(params) {
   const {
-    clientName, clientDocUrl, websiteUrl, packageTier,
+    clientName, clientDocUrl, packageTier,
     customKeywords, campaignMonth, prevSpreadsheetUrl,
     channel, threadTs, progressTs, userId,
   } = params;
@@ -71,14 +71,10 @@ async function executePipeline(params) {
   try {
     // Get brand profile
     await updateProgress('Loading brand profile...');
-    const brandProfile = await getBrandProfile(clientName, clientDocUrl, websiteUrl, updateProgress);
+    const brandProfile = await getBrandProfile(clientName, clientDocUrl, null, updateProgress);
 
     if (!brandProfile) {
-      const hint = clientDocUrl
-        ? 'Could not read the Google Doc. Check sharing permissions.'
-        : websiteUrl
-          ? 'Website research failed. Check the URL.'
-          : 'Provide a Client Info Doc or website URL.';
+      const hint = 'Could not read the Google Doc. Check sharing permissions (must be shared with the service account).';
       await updateProgress(`Could not load brand profile for "${titleCase(clientName)}". ${hint}`);
       return;
     }

@@ -37,24 +37,10 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
       block_id: 'client_doc_block',
       label: { type: 'plain_text', text: 'Client Info Doc (Google Docs)' },
       hint: { type: 'plain_text', text: 'Paste the Google Docs link to the client info document. George will read it to build the brand profile.' },
-      optional: true,
       element: {
         type: 'url_text_input',
         action_id: 'client_doc_input',
         placeholder: { type: 'plain_text', text: 'https://docs.google.com/document/d/...' },
-      },
-    });
-
-    // ── Client Website URL (optional — for new clients without info doc) ──
-    blocks.push({
-      type: 'input',
-      block_id: 'client_url_block',
-      label: { type: 'plain_text', text: 'Client Website URL (optional)' },
-      optional: true,
-      element: {
-        type: 'url_text_input',
-        action_id: 'client_url_input',
-        placeholder: { type: 'plain_text', text: 'https://www.example.com (fallback if no info doc)' },
       },
     });
 
@@ -92,7 +78,6 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
       type: 'input',
       block_id: 'month_block',
       label: { type: 'plain_text', text: 'Campaign Month' },
-      optional: true,
       element: {
         type: 'static_select',
         action_id: 'month_select',

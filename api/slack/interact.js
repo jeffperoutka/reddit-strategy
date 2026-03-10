@@ -40,7 +40,6 @@ async function setupAndTriggerPipeline(req, payload) {
   // Parse form values
   const clientName = (values?.client_block?.client_name_input?.value || '').trim();
   const clientDocUrl = values?.client_doc_block?.client_doc_input?.value || '';
-  const websiteUrl = values?.client_url_block?.client_url_input?.value || '';
   const packageTier = values?.package_block?.package_select?.selected_option?.value || 'b';
   const customKeywords = values?.keywords_block?.keywords_input?.value || '';
   const campaignMonth = values?.month_block?.month_select?.selected_option?.value || '1';
@@ -124,7 +123,6 @@ async function setupAndTriggerPipeline(req, payload) {
       body: JSON.stringify({
         clientName,
         clientDocUrl,
-        websiteUrl,
         packageTier,
         customKeywords,
         campaignMonth,
