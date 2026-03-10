@@ -23,7 +23,16 @@ module.exports = async function handler(req, res) {
 
     if (callbackId === 'reddit_strategy_submit') {
       res.status(200).json({ response_action: 'clear' });
-      waitUntil(handleStrategyRun(payload));
+      waitUntil(handleStrategyRun(payload).catch(err => {
+        console.error('FATAL: handleStrategyRun crashed:', err.message, err.stack);
+        // Attempt to notify user via DM
+        const userId = payload.user?.id;
+        if (userId) {
+          slack.openDM(userId).then(ch =>
+            slack.postMessage(ch, `Strategy run crashed unexpectedly: ${err.message}\nThis may be a timeout issue. Check Vercel logs.`)
+          ).catch(() => {});
+        }
+      }));
       return;
     }
 
