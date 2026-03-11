@@ -112,7 +112,12 @@ async function executePhase3(params) {
     console.log(`[Phase3 ${elapsed()}s] Report built`);
 
     // ── Step 4: Build spreadsheet & upload ──
-    await updateProgress('Building spreadsheet...');
+    const monthInt = parseInt(campaignMonth) || 1;
+    if (monthInt > 1 && prevSpreadsheetUrl) {
+      await updateProgress(`Month ${campaignMonth}: Appending to existing spreadsheet...`);
+    } else {
+      await updateProgress('Building spreadsheet...');
+    }
 
     const formData = {
       month: campaignMonth,
@@ -123,14 +128,25 @@ async function executePhase3(params) {
 
     let driveUrl = null;
     let xlsxBuffer = null;
+    let appendedToExisting = false;
 
     // Try Google Drive upload (requires GOOGLE_IMPERSONATE_EMAIL for domain-wide delegation)
     try {
       const result = await buildGoogleSheetsReport(data, brandProfile, packageTier, formData);
       xlsxBuffer = result.xlsxBuffer;
       driveUrl = result.driveUrl;
-      if (driveUrl) {
+
+      // Check if we actually appended to existing sheet vs created new
+      const prevId = prevSpreadsheetUrl?.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)?.[1];
+      if (monthInt > 1 && prevId && driveUrl?.includes(prevId)) {
+        appendedToExisting = true;
+        console.log(`[Phase3 ${elapsed()}s] Successfully appended Month ${campaignMonth} to existing sheet`);
+        await threadPost(`Month ${campaignMonth} data appended to existing spreadsheet.`);
+      } else if (driveUrl) {
         console.log(`[Phase3 ${elapsed()}s] Google Sheet created: ${driveUrl}`);
+        if (monthInt > 1) {
+          await threadPost(`Could not append to existing sheet — created new spreadsheet instead. Check that the previous spreadsheet URL is correct and accessible.`);
+        }
       }
     } catch (driveErr) {
       console.error(`[Phase3 ${elapsed()}s] Drive upload failed: ${driveErr.message}`);
