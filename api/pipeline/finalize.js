@@ -43,12 +43,20 @@ async function executePhase3(params) {
     brandProfile, keywords, threads, threadAnalysis, aiCitations,
     comments, posts,
     packageTier, campaignMonth, prevSpreadsheetUrl, clientDocUrl,
+    customPosts, customComments, customUpvotes,
     channel, threadTs, progressTs, userId,
   } = params;
 
   const runStart = Date.now();
   const elapsed = () => ((Date.now() - runStart) / 1000).toFixed(1);
   const pkg = getPackage(packageTier);
+
+  // Apply custom scope overrides
+  if (packageTier === 'custom' && pkg) {
+    if (customPosts != null) pkg.monthlyTargets.posts = customPosts;
+    if (customComments != null) pkg.monthlyTargets.comments = customComments;
+    if (customUpvotes != null) pkg.monthlyTargets.upvotes = customUpvotes;
+  }
   const clientName = brandProfile?.clientName || 'Client';
 
   const updateProgress = async (stepText) => {

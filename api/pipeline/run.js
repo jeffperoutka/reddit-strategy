@@ -41,6 +41,8 @@ async function executePhase1(req, params) {
   const {
     clientName, clientDocUrl, packageTier,
     customKeywords, campaignMonth, prevSpreadsheetUrl,
+    targetSubreddits, notes,
+    customPosts, customComments, customUpvotes,
     channel, threadTs, progressTs, userId,
   } = params;
 
@@ -71,6 +73,8 @@ async function executePhase1(req, params) {
     // Step 1: Brand profile
     await updateProgress('Loading brand profile...');
     const brandProfile = await getBrandProfile(clientName, clientDocUrl, null, updateProgress);
+    // Attach notes to brand profile so they flow through all prompts
+    if (notes) brandProfile.additionalNotes = notes;
 
     if (!brandProfile) {
       const hint = 'Could not read the Google Doc. Check sharing permissions (must be shared with the service account).';
@@ -86,7 +90,7 @@ async function executePhase1(req, params) {
 
     // Step 3: Discover threads
     await updateProgress(`Searching Google for Reddit threads across ${keywords.length} keywords...`);
-    const threads = await discoverThreads(keywords, packageTier);
+    const threads = await discoverThreads(keywords, packageTier, targetSubreddits);
     await updateProgress(`Discovered ${threads.length} Reddit threads`);
 
     // Step 4: AI citations (Package B & C only)
@@ -132,6 +136,9 @@ async function executePhase1(req, params) {
         campaignMonth,
         prevSpreadsheetUrl,
         clientDocUrl,
+        customPosts,
+        customComments,
+        customUpvotes,
         channel,
         threadTs,
         progressTs,

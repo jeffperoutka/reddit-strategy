@@ -73,6 +73,52 @@ async function openStrategyModal(triggerId, prefillText, channelId) {
       },
     });
 
+    // ── Custom Scope Inputs (used when Custom Scope is selected) ──
+    blocks.push({
+      type: 'input',
+      block_id: 'custom_posts_block',
+      label: { type: 'plain_text', text: 'Custom Posts Count' },
+      optional: true,
+      hint: { type: 'plain_text', text: 'Only used when Custom Scope is selected. Number of posts per month.' },
+      element: {
+        type: 'number_input',
+        action_id: 'custom_posts_input',
+        is_decimal_allowed: false,
+        min_value: '0',
+        placeholder: { type: 'plain_text', text: 'e.g. 20' },
+      },
+    });
+
+    blocks.push({
+      type: 'input',
+      block_id: 'custom_comments_block',
+      label: { type: 'plain_text', text: 'Custom Comments Count' },
+      optional: true,
+      hint: { type: 'plain_text', text: 'Only used when Custom Scope is selected. Number of comments per month.' },
+      element: {
+        type: 'number_input',
+        action_id: 'custom_comments_input',
+        is_decimal_allowed: false,
+        min_value: '0',
+        placeholder: { type: 'plain_text', text: 'e.g. 40' },
+      },
+    });
+
+    blocks.push({
+      type: 'input',
+      block_id: 'custom_upvotes_block',
+      label: { type: 'plain_text', text: 'Custom Upvotes Count' },
+      optional: true,
+      hint: { type: 'plain_text', text: 'Only used when Custom Scope is selected. Number of upvotes per month.' },
+      element: {
+        type: 'number_input',
+        action_id: 'custom_upvotes_input',
+        is_decimal_allowed: false,
+        min_value: '0',
+        placeholder: { type: 'plain_text', text: 'e.g. 100' },
+      },
+    });
+
     // ── Month Number ──
     blocks.push({
       type: 'input',

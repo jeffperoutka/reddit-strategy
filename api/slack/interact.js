@@ -44,6 +44,11 @@ async function setupAndTriggerPipeline(req, payload) {
   const customKeywords = values?.keywords_block?.keywords_input?.value || '';
   const campaignMonth = values?.month_block?.month_select?.selected_option?.value || '1';
   const prevSpreadsheetUrl = values?.prev_spreadsheet_block?.prev_spreadsheet_input?.value || '';
+  const targetSubreddits = values?.subreddits_block?.subreddits_input?.value || '';
+  const notes = values?.notes_block?.notes_input?.value || '';
+  const customPosts = values?.custom_posts_block?.custom_posts_input?.value || '';
+  const customComments = values?.custom_comments_block?.custom_comments_input?.value || '';
+  const customUpvotes = values?.custom_upvotes_block?.custom_upvotes_input?.value || '';
 
   if (!clientName) {
     console.error('Missing client name');
@@ -127,6 +132,11 @@ async function setupAndTriggerPipeline(req, payload) {
         customKeywords,
         campaignMonth,
         prevSpreadsheetUrl,
+        targetSubreddits,
+        notes,
+        customPosts: customPosts ? parseInt(customPosts) : null,
+        customComments: customComments ? parseInt(customComments) : null,
+        customUpvotes: customUpvotes ? parseInt(customUpvotes) : null,
         channel,
         threadTs,
         progressTs,
