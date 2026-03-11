@@ -136,21 +136,20 @@ async function executePhase3(params) {
       xlsxBuffer = result.xlsxBuffer;
       driveUrl = result.driveUrl;
 
-      // Check if we actually appended to existing sheet vs created new
-      const prevId = prevSpreadsheetUrl?.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)?.[1];
-      if (monthInt > 1 && prevId && driveUrl?.includes(prevId)) {
+      if (result.appended) {
         appendedToExisting = true;
         console.log(`[Phase3 ${elapsed()}s] Successfully appended Month ${campaignMonth} to existing sheet`);
         await threadPost(`Month ${campaignMonth} data appended to existing spreadsheet.`);
+      } else if (result.appendError) {
+        // Post the EXACT reason to Slack so we can debug
+        console.error(`[Phase3 ${elapsed()}s] Append issue: ${result.appendError}`);
+        await threadPost(`Could not append Month ${campaignMonth} to existing sheet.\nReason: ${result.appendError}\n\n${driveUrl ? 'Created new spreadsheet instead.' : 'XLSX attached below.'}`);
       } else if (driveUrl) {
         console.log(`[Phase3 ${elapsed()}s] Google Sheet created: ${driveUrl}`);
-        if (monthInt > 1) {
-          await threadPost(`Could not append to existing sheet — created new spreadsheet instead. Check that the previous spreadsheet URL is correct and accessible.`);
-        }
       }
     } catch (driveErr) {
       console.error(`[Phase3 ${elapsed()}s] Drive upload failed: ${driveErr.message}`);
-      // Build XLSX directly as fallback
+      await threadPost(`Google Sheets failed: ${driveErr.message}`);
       try {
         xlsxBuffer = await buildStrategySpreadsheet(data, brandProfile, packageTier, formData);
       } catch (xlsxErr) {
