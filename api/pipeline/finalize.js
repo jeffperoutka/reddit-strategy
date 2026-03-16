@@ -11,7 +11,7 @@ const slack = require('../../lib/connectors/slack');
 const { checkBrandAlignment, buildStrategyReport, planUpvoteSupport } = require('../../lib/engine');
 const { getPackage } = require('../../lib/packages');
 const { buildStrategySpreadsheet } = require('../../lib/spreadsheet');
-const { buildGoogleSheetsReport } = require('../../lib/google-spreadsheet');
+const { buildGoogleSheetsReport, extractSpreadsheetId } = require('../../lib/google-spreadsheet');
 
 const PIPELINE_SECRET = process.env.PIPELINE_SECRET || 'george-internal-pipeline-2024';
 
@@ -25,7 +25,9 @@ module.exports = async function handler(req, res) {
 
   res.status(202).json({ status: 'accepted' });
 
-  waitUntil(executePhase3(req.body).catch(err => {
+  // Pass host for Phase 4 trigger
+  const host = req.headers.host || req.headers['x-forwarded-host'];
+  waitUntil(executePhase3(req.body, host).catch(err => {
     console.error('FATAL: Phase 3 crashed:', err.message, err.stack);
     const { channel, threadTs, userId } = req.body || {};
     if (channel && threadTs) {
@@ -38,7 +40,7 @@ module.exports = async function handler(req, res) {
   }));
 };
 
-async function executePhase3(params) {
+async function executePhase3(params, host) {
   const {
     brandProfile, keywords, threads, threadAnalysis, aiCitations,
     comments, posts,
@@ -197,6 +199,33 @@ async function executePhase3(params) {
     }
 
     await threadPost(summaryLines.join('\n'));
+
+    // ── Step 6: Trigger Phase 4 (QA Review) ──
+    const spreadsheetId = driveUrl ? extractSpreadsheetId(driveUrl) : null;
+    console.log(`[Phase3 ${elapsed()}s] Triggering Phase 4 (QA)...`);
+    try {
+      const protocol = host?.includes('localhost') ? 'http' : 'https';
+      const phase4Url = `${protocol}://${host}/api/pipeline/qa`;
+      const phase4Resp = await fetch(phase4Url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-pipeline-secret': PIPELINE_SECRET,
+        },
+        body: JSON.stringify({
+          strategyData: data,
+          brandProfile,
+          packageTier,
+          driveUrl,
+          spreadsheetId,
+          channel, threadTs, progressTs, userId,
+        }),
+      });
+      console.log(`[Phase3 ${elapsed()}s] Phase 4 trigger response: ${phase4Resp.status}`);
+    } catch (qaErr) {
+      console.error(`[Phase3 ${elapsed()}s] Phase 4 trigger failed:`, qaErr.message);
+      await threadPost(`QA review could not be triggered: ${qaErr.message}`);
+    }
 
   } catch (err) {
     console.error(`[Phase3 ${elapsed()}s] Error:`, err.message, err.stack);

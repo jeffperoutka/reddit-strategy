@@ -12,8 +12,58 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  if (command === '/reddit-execute') {
+    res.status(200).send('');
+    waitUntil(openExecuteModal(trigger_id, text, channel_id));
+    return;
+  }
+
   res.status(200).send('Unknown command');
 };
+
+async function openExecuteModal(triggerId, prefillText, channelId) {
+  try {
+    const blocks = [
+      {
+        type: 'input',
+        block_id: 'execute_sheet_block',
+        label: { type: 'plain_text', text: 'Google Sheet URL' },
+        hint: { type: 'plain_text', text: 'Paste the Google Sheet with approved content. Items with Status = "Approved" will be submitted to Engain.' },
+        element: {
+          type: 'url_text_input',
+          action_id: 'execute_sheet_input',
+          placeholder: { type: 'plain_text', text: 'https://docs.google.com/spreadsheets/d/...' },
+        },
+      },
+      {
+        type: 'input',
+        block_id: 'execute_project_block',
+        label: { type: 'plain_text', text: 'Engain Project ID (optional)' },
+        optional: true,
+        hint: { type: 'plain_text', text: 'Leave blank to use default. Only set if using a specific Engain project.' },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'execute_project_input',
+          placeholder: { type: 'plain_text', text: 'Leave blank for default' },
+        },
+      },
+    ];
+
+    const modal = {
+      type: 'modal',
+      callback_id: 'reddit_execute_submit',
+      private_metadata: JSON.stringify({ channel_id: channelId || '' }),
+      title: { type: 'plain_text', text: 'George — Execute' },
+      submit: { type: 'plain_text', text: 'Execute Approved' },
+      close: { type: 'plain_text', text: 'Cancel' },
+      blocks,
+    };
+
+    await slack.openModal(triggerId, modal);
+  } catch (err) {
+    console.error('openExecuteModal error:', err.message);
+  }
+}
 
 async function openStrategyModal(triggerId, prefillText, channelId) {
   try {

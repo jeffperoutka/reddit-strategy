@@ -23,6 +23,12 @@ module.exports = async function handler(req, res) {
       return;
     }
 
+    if (callbackId === 'reddit_execute_submit') {
+      res.status(200).json({ response_action: 'clear' });
+      waitUntil(setupAndTriggerExecute(req, payload));
+      return;
+    }
+
     return res.status(200).json({ response_action: 'clear' });
   }
 
@@ -155,6 +161,70 @@ async function setupAndTriggerPipeline(req, payload) {
     } catch (e) {
       console.error('Failed to notify user:', e.message);
     }
+  }
+}
+
+// ─── Execute flow ───
+
+async function setupAndTriggerExecute(req, payload) {
+  const values = payload.view?.state?.values;
+  const userId = payload.user?.id;
+  let metadata = {};
+  try { metadata = JSON.parse(payload.view?.private_metadata || '{}'); } catch (e) {}
+
+  const spreadsheetUrl = values?.execute_sheet_block?.execute_sheet_input?.value || '';
+  const projectId = (values?.execute_project_block?.execute_project_input?.value || '').trim();
+
+  if (!spreadsheetUrl) {
+    console.error('[Execute] Missing spreadsheet URL');
+    return;
+  }
+
+  let channel = metadata.channel_id || process.env.SLACK_CHANNEL_ID;
+
+  // Post thread header
+  let parentMsg;
+  try {
+    await slack.joinChannel(channel).catch(() => {});
+    parentMsg = await slack.postMessage(channel, `*George — Executing Approved Content*\nSheet: ${spreadsheetUrl}`);
+    if (!parentMsg.ok) throw new Error(parentMsg.error);
+  } catch (err) {
+    console.error(`Channel post failed (${channel}):`, err.message);
+    try {
+      channel = await slack.openDM(userId);
+      parentMsg = await slack.postMessage(channel, `*George — Executing Approved Content*\nSheet: ${spreadsheetUrl}`);
+    } catch (dmErr) {
+      console.error('DM fallback failed:', dmErr.message);
+      return;
+    }
+  }
+
+  const threadTs = parentMsg.ts;
+
+  // Trigger the execute endpoint
+  const host = req.headers.host || req.headers['x-forwarded-host'];
+  const protocol = host?.includes('localhost') ? 'http' : 'https';
+  const executeUrl = `${protocol}://${host}/api/execute`;
+
+  try {
+    const resp = await fetch(executeUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-pipeline-secret': process.env.PIPELINE_SECRET || 'george-internal-pipeline-2024',
+      },
+      body: JSON.stringify({
+        spreadsheetUrl,
+        projectId: projectId || undefined,
+        channel,
+        threadTs,
+        userId,
+      }),
+    });
+    console.log(`[Execute] Trigger response: ${resp.status}`);
+  } catch (err) {
+    console.error('[Execute] Trigger failed:', err.message);
+    await slack.postMessage(channel, `Execute failed to start: ${err.message}`, { threadTs });
   }
 }
 
