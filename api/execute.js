@@ -10,6 +10,7 @@ const { waitUntil } = require('@vercel/functions');
 const slack = require('../lib/connectors/slack');
 const engain = require('../lib/connectors/engain');
 const { getSheetsClient, extractSpreadsheetId } = require('../lib/google-spreadsheet');
+const { validateThread } = require('../lib/reddit-validator');
 
 const PIPELINE_SECRET = process.env.PIPELINE_SECRET || 'george-internal-pipeline-2024';
 
@@ -87,6 +88,18 @@ async function executeApprovedContent(req, params) {
       if (!threadUrl || !commentText) {
         commentResults.push({ row: row.rowNum, status: 'skipped', reason: 'Missing URL or text' });
         continue;
+      }
+
+      // Validate thread is still commentable
+      try {
+        const check = await validateThread(threadUrl);
+        if (!check.valid) {
+          commentResults.push({ row: row.rowNum, status: 'skipped', reason: `Thread ${check.reason}: ${threadUrl}` });
+          console.log(`[Execute] Comment ${i + 1}: skipped — thread ${check.reason}`);
+          continue;
+        }
+      } catch (valErr) {
+        console.warn(`[Execute] Thread validation failed for row ${row.rowNum}, proceeding anyway:`, valErr.message);
       }
 
       try {
