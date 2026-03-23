@@ -11,6 +11,7 @@ const slack = require('../../lib/connectors/slack');
 const { extractKeywords, discoverThreads, checkAICitations, analyzeThreads } = require('../../lib/engine');
 const { getPackage } = require('../../lib/packages');
 const { getBrandProfile } = require('../../lib/brand-context');
+const { validateThreads } = require('../../lib/reddit-validator');
 
 const PIPELINE_SECRET = process.env.PIPELINE_SECRET || 'george-internal-pipeline-2024';
 
@@ -90,8 +91,25 @@ async function executePhase1(req, params) {
 
     // Step 3: Discover threads
     await updateProgress(`Searching Google for Reddit threads across ${keywords.length} keywords...`);
-    const threads = await discoverThreads(keywords, packageTier, targetSubreddits);
+    let threads = await discoverThreads(keywords, packageTier, targetSubreddits);
     await updateProgress(`Discovered ${threads.length} Reddit threads`);
+
+    // Step 3b: Validate threads (filter locked, archived, deleted)
+    if (threads.length > 0) {
+      await updateProgress(`Validating ${threads.length} threads (checking locked/archived/deleted)...`);
+      const threadUrls = threads.map(t => t.url);
+      const validation = await validateThreads(threadUrls);
+      const validUrls = new Set(validation.valid.map(v => v.url));
+      const preCount = threads.length;
+      threads = threads.filter(t => validUrls.has(t.url));
+      const filtered = preCount - threads.length;
+      if (filtered > 0) {
+        const reasons = Object.entries(validation.summary.invalidReasons || {})
+          .map(([r, c]) => `${c} ${r}`).join(', ');
+        console.log(`[Phase1 ${elapsed()}s] Filtered ${filtered} threads: ${reasons}`);
+        await updateProgress(`Filtered ${filtered} invalid threads (${reasons}). ${threads.length} valid threads remaining.`);
+      }
+    }
 
     // Step 4: AI citations (Package B & C only)
     let aiCitations = [];
