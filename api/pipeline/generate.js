@@ -108,7 +108,18 @@ async function executePhase2(req, params) {
     }
 
     // ── Trigger Phase 3: Finalize (alignment, report, Google Sheets) ──
-    console.log(`[Phase2 ${elapsed()}s] Phase 2 complete. Triggering Phase 3...`);
+    console.log(`[Phase2 ${elapsed()}s] Phase 2 complete. DATA CHECK: comments=${comments.length}, posts=${posts.length}. Triggering Phase 3...`);
+
+    // Calculate body size to check for potential truncation
+    const phase3Body = {
+      brandProfile, keywords, threads, threadAnalysis, aiCitations,
+      comments, posts,
+      packageTier, campaignMonth, prevSpreadsheetUrl, clientDocUrl,
+      customPosts, customComments, customUpvotes,
+      channel, threadTs, progressTs, userId,
+    };
+    const bodyStr = JSON.stringify(phase3Body);
+    console.log(`[Phase2 ${elapsed()}s] Phase 3 body size: ${(bodyStr.length / 1024).toFixed(1)}KB`);
 
     const host = req.headers.host || req.headers['x-forwarded-host'];
     const protocol = host?.includes('localhost') ? 'http' : 'https';
@@ -120,29 +131,7 @@ async function executePhase2(req, params) {
         'Content-Type': 'application/json',
         'x-pipeline-secret': PIPELINE_SECRET,
       },
-      body: JSON.stringify({
-        // Research data from Phase 1
-        brandProfile,
-        keywords,
-        threads,
-        threadAnalysis,
-        aiCitations,
-        // Generated content from Phase 2
-        comments,
-        posts,
-        // Pass-through params
-        packageTier,
-        campaignMonth,
-        prevSpreadsheetUrl,
-        clientDocUrl,
-        customPosts,
-        customComments,
-        customUpvotes,
-        channel,
-        threadTs,
-        progressTs,
-        userId,
-      }),
+      body: bodyStr,
     });
 
     console.log(`[Phase2 ${elapsed()}s] Phase 3 trigger response: ${phase3Resp.status}`);

@@ -81,6 +81,14 @@ async function executePhase3(params, host) {
   try {
     let data = { keywords, threads, threadAnalysis, aiCitations, comments, posts };
 
+    // ── Data integrity check ──
+    console.log(`[Phase3 ${elapsed()}s] DATA CHECK: comments=${Array.isArray(comments) ? comments.length : typeof comments}, posts=${Array.isArray(posts) ? posts.length : typeof posts}, threads=${Array.isArray(threads) ? threads.length : typeof threads}`);
+    if ((!comments || comments.length === 0) && (!posts || posts.length === 0)) {
+      const errMsg = `Phase 3 received EMPTY data: 0 comments, 0 posts. Phase 2 may have failed silently.`;
+      console.error(`[Phase3] ${errMsg}`);
+      await threadPost(errMsg);
+    }
+
     // ── Step 1: Brand alignment check ──
     if (comments.length > 0) {
       await updateProgress(`Checking brand alignment on ${comments.length} comments...`);
@@ -115,6 +123,7 @@ async function executePhase3(params, host) {
     console.log(`[Phase3 ${elapsed()}s] Report built`);
 
     // ── Step 4: Build spreadsheet & upload ──
+    console.log(`[Phase3 ${elapsed()}s] PRE-SHEET DATA: commentsWithAlignment=${data.commentsWithAlignment?.length || 0}, posts=${data.posts?.length || 0}, upvotePlan=${data.upvotePlan?.distribution?.length || 0}, report=${!!data.report?.executiveSummary}`);
     const monthInt = parseInt(campaignMonth) || 1;
     if (monthInt > 1 && prevSpreadsheetUrl) {
       await updateProgress(`Month ${campaignMonth}: Appending to existing spreadsheet...`);

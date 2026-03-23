@@ -61,6 +61,18 @@ async function executePhase4(params) {
   };
 
   try {
+    // ── Empty data guard ──
+    const commentCount = (strategyData?.commentsWithAlignment || strategyData?.comments || []).length;
+    const postCount = (strategyData?.posts || []).length;
+    console.log(`[Phase4 ${elapsed()}s] DATA CHECK: comments=${commentCount}, posts=${postCount}`);
+    if (commentCount === 0 && postCount === 0) {
+      const errMsg = `QA aborted: sheet has 0 comments and 0 posts. Data was lost between pipeline phases. This is a critical bug — do not deliver empty sheets.`;
+      console.error(`[Phase4] ${errMsg}`);
+      await threadPost(errMsg);
+      await updateProgress('QA FAILED — empty data.');
+      return;
+    }
+
     await updateProgress('Running QA review on all content...');
 
     // ── Run QA ──
