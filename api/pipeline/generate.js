@@ -84,14 +84,15 @@ async function executePhase2(req, params) {
       const commentPromise = generateComments(
         threadAnalysis.analyzedThreads,
         brandProfile,
-        packageTier
+        packageTier,
+        pkg
       ).catch(err => {
         console.error('Comment generation failed:', err.message);
         return { comments: [] };
       });
 
       const postPromise = (pkg?.monthlyTargets?.posts > 0)
-        ? generatePosts(threadAnalysis.analyzedThreads, brandProfile, packageTier)
+        ? generatePosts(threadAnalysis.analyzedThreads, brandProfile, packageTier, pkg)
             .catch(err => {
               console.error('Post generation failed:', err.message);
               return { posts: [] };

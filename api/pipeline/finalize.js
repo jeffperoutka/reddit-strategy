@@ -97,7 +97,8 @@ async function executePhase3(params, host) {
         data.upvotePlan = planUpvoteSupport(
           data.commentsWithAlignment || [],
           data.posts || [],
-          packageTier
+          packageTier,
+          pkg
         );
       } catch (err) {
         console.error('Upvote planning failed:', err.message);
