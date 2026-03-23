@@ -8,5 +8,20 @@
     "rule": "Every comment and post must be unique — different angles, different personas, different brand name variations. If generating multiple comments for the same thread, each must take a completely different approach. Never duplicate content or recycle the same angle.",
     "source": "jeff",
     "addedAt": "2026-03-19"
+  },
+  {
+    "rule": "SOUND HUMAN, NOT AI. Never use em dashes (—  or --). Never use semicolons. Avoid overly structured sentences, numbered lists, or bullet points in comments. Don't use words like 'honestly', 'genuinely', 'actually' excessively. Don't start sentences with 'So,' or 'I mean,'. Avoid perfect grammar — real Redditors use sentence fragments, skip commas, and write casually. Mix up sentence length. Short punchy sentences next to longer ones. Use contractions always (don't, won't, can't, it's). Never write 'do not' or 'I have' when 'don't' or 'I've' works.",
+    "source": "jeff",
+    "addedAt": "2026-03-23"
+  },
+  {
+    "rule": "BANNED PHRASES AND PATTERNS: Never use these in comments or posts: 'game-changer', 'game changer', 'I stumbled upon', 'I recently discovered', 'blown away', 'can't recommend enough', 'highly recommend', 'I was pleasantly surprised', 'take it to the next level', 'worth every penny', 'hands down', 'not gonna lie', 'if you're looking for', 'I've been using X for Y months and', 'as someone who'. These are dead giveaways of AI-generated content.",
+    "source": "jeff",
+    "addedAt": "2026-03-23"
+  },
+  {
+    "rule": "REDDIT VOICE: Write like a real person on Reddit. Use lowercase for casual comments. Throw in typos or informal spelling occasionally (gonna, kinda, tbh, ngl, imo, fwiw). Use Reddit-native formatting like 'edit:' for additions. Reference specific personal details that feel real (my girlfriend, my roommate, last tuesday, etc). Keep most comments under 4 sentences. Long comments feel like ads.",
+    "source": "jeff",
+    "addedAt": "2026-03-23"
   }
 ]
